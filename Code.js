@@ -37,9 +37,11 @@ function onOpen() {
     .addItem('Build quotes, orders & opportunities', 'buildCrmRecords')
     .addItem('Process attachments (PDF, Excel, images)', 'processAttachments')
     .addItem('Draft 10 follow-ups (nothing is sent)', 'buildFollowUps')
+    .addItem('Run full pipeline (all steps above, after import)', 'runFullPipeline')
     .addSeparator()
     .addItem('Sync Gmail now (authorized test account)', 'syncNow')
     .addItem('Install daily sync trigger', 'installDailySync')
+    .addItem('Backfill Gmail history (resumable)', 'backfillGmail')
     .addSeparator()
     .addItem('Reset demo data (asks first)', 'resetDemoData')
     .addToUi();
@@ -101,11 +103,12 @@ function getExistingMessageIds_() {
   if (n < 2) return new Set();
   return new Set(s.getRange(2, 1, n - 1, 1).getValues().map(x => String(x[0])).filter(Boolean));
 }
+/** Email Log row. processed_at starts empty and is filled only after the whole pipeline succeeds. */
 function headerToRow_(record) {
   return [record.message_id,record.thread_id,record.date_time,record.direction,
     record.from_email,record.to_email,record.subject,String(record.body || '').slice(0,1200),
     '', '', 'Unclassified', '', (record.attachment_filenames || '').split('|').filter(Boolean).length,
-    new Date(), record.source || 'SYNTHETIC_CSV','Needs Review','',
+    '', record.source || 'SYNTHETIC_CSV','Needs Review',record.source_link || '',
     record.attachment_filenames || '', ''];
 }
 function writeLog_(start, status, processed, skipped, errorCount, detail) {
@@ -145,9 +148,9 @@ function importSampleCsv() {
     });
     const r=addBatch_(imported,known);added=r.added;skipped=r.skipped;
     // 'Imported', not 'Success': the Dashboard's "Successful sync runs" should count Gmail syncs only.
-    writeLog_(start,'Imported',added,skipped,0,'Sample CSV imported. Run "Classify emails" to label new rows.');
+    writeLog_(start,'Imported',added,skipped,0,'Sample CSV imported. Run "Run full pipeline" to classify and process new rows.');
     SpreadsheetApp.getActiveSpreadsheet().toast('Added '+added+' emails, skipped '+skipped+
-      ' already in the Email Log. Next: Classify emails.','SWAG CRM',8);
+      ' already in the Email Log. Next: Run full pipeline.','SWAG CRM',8);
   } catch(e) {
     writeLog_(start,'Failed',added,skipped,1,String(e));
     SpreadsheetApp.getActiveSpreadsheet().toast('Import failed: '+String(e).slice(0,200),'SWAG CRM',15);
@@ -156,9 +159,9 @@ function importSampleCsv() {
 }
 
 /**
- * SAFE, CONSERVATIVE starter Gmail sync: bounded recent-message import ONLY.
- * Students must improve checkpointing/pagination and verify complete coverage.
- * No historical backfill, AI extraction, or attachment parsing is implemented.
+ * SWAG Shop's own addresses (mail FROM these is OUT): the account owner, its
+ * Gmail send-as aliases, and any extra addresses in Script property BUSINESS_EMAILS.
+ * Gmail sync itself lives in SyncRunner.js.
  */
 function businessEmails_() {
   const configured=(property_('BUSINESS_EMAILS')||'').split(',').map(x=>x.trim().toLowerCase()).filter(Boolean);
@@ -166,58 +169,15 @@ function businessEmails_() {
   const aliases=GmailApp.getAliases();
   return new Set(configured.concat(owner? [owner.toLowerCase()]:[]).concat(aliases.map(x=>x.toLowerCase())));
 }
-function fromAddress_(raw) {
-  const match=String(raw||'').match(/<([^>]+)>/);
-  return (match? match[1]:String(raw||'')).trim().toLowerCase();
-}
-function syncNow(){ syncGmailRecent_(); }
-function dailySync(){ syncGmailRecent_(); }
-function syncGmailRecent_(){
-  const lock=LockService.getScriptLock();
-  if (!lock.tryLock(10000)) throw new Error('Another sync is running');
-  const start=new Date();let processed=0,skipped=0,errors=0;
-  try {
-    const known=getExistingMessageIds_();
-    const businessEmails=businessEmails_();
-    const cutoff=new Date(Date.now()-14*24*60*60*1000);
-    const query='newer_than:14d -in:spam -in:trash';
-    const threads=GmailApp.search(query,0,100); // IMPORTANT: bounded starter, not a complete mailbox crawler
-    let records=[];
-    threads.forEach(thread=>{
-      thread.getMessages().forEach(m=>{
-        if(m.getDate()<cutoff) return;
-        let from=m.getFrom();
-        let direction=businessEmails.has(fromAddress_(from))?'OUT':'IN';
-        // Configure additional owned inboxes/aliases via BUSINESS_EMAILS script property.
-        records.push({
-          message_id:m.getId(),thread_id:thread.getId(),date_time:m.getDate(),
-          direction:direction,from_email:from,to_email:m.getTo(),subject:m.getSubject(),
-          body:m.getPlainBody(),attachment_filenames:m.getAttachments({includeInlineImages:false}).map(a=>a.getName()).join('|'),
-          source:'LIVE_GMAIL'
-        });
-      });
-    });
-    const res=addBatch_(records,known);processed=res.added;skipped=res.skipped;
-    const isPartial=threads.length===100;
-    writeLog_(start,isPartial?'Partial':'Success',processed,skipped,errors,
-      isPartial?'Reached 100-thread safety cap. Do not assume complete sync; implement paging/checkpoints.':'Recent Gmail messages imported. Run "Classify emails" to label new rows.');
-  }catch(e){errors++;writeLog_(start,'Failed',processed,skipped,errors,String(e));throw e;}
-  finally{lock.releaseLock();}
-}
 
+/** Installs (or replaces) the daily sync trigger at Settings > daily_sync_hour (default 7), company time zone. */
 function installDailySync() {
-  ScriptApp.getProjectTriggers().filter(t=>t.getHandlerFunction()==='dailySync')
-    .forEach(t=>ScriptApp.deleteTrigger(t));
-  ScriptApp.newTrigger('dailySync').timeBased().atHour(7).everyDays(1).inTimezone(SS_TZ).create();
-  SpreadsheetApp.getUi().alert('Daily trigger installed for around 7 AM Central. Google chooses an execution time within a window. Triggers run under the creating account.');
+  requireSyncEnabled_();
+  const raw = setting_(SpreadsheetApp.getActiveSpreadsheet(), 'daily_sync_hour');
+  const hour = raw === '' ? 7 : Number(raw);
+  const atHour = Number.isInteger(hour) && hour >= 0 && hour <= 23 ? hour : 7;
+  clearTriggers_('dailySync');
+  ScriptApp.newTrigger('dailySync').timeBased().atHour(atHour).everyDays(1).inTimezone(SS_TZ).create();
+  SpreadsheetApp.getUi().alert('Daily sync installed for around ' + atHour + ':00 ' + SS_TZ + '. Google picks the exact ' +
+    'minute within that hour. The trigger runs as the account that installed it; reinstall it after copying the project.');
 }
-
-// STUDENT WORK TODO (these are essential, not optional):
-// - Implement customer/contact normalization and safe entity matching.
-// - Write actual opportunity, quote, order and follow-up rows; keep source message IDs.
-// - Parse PDFs, Excel, CSV and artwork securely and persist extraction evidence.
-// - Validate order evidence; supplier quote is NOT a customer quote.
-// - Add a resumable Gmail history backfill and durable checkpoint / retry scheme.
-// - Validate multi-inbox direction and support aliases before production.
-// - Respect opt-outs and prevent duplicates across imports and senders.
-// - Add human-reviewed Gmail draft creation and careful error handling.

@@ -21,36 +21,12 @@ function processAttachments() {
   const start = new Date();
   try {
     const ss = SpreadsheetApp.getActiveSpreadsheet();
-    const folderId = property_('ATTACHMENTS_FOLDER_ID');
-    if (!folderId) throw new Error('Set Script property ATTACHMENTS_FOLDER_ID to the Drive folder that holds attachment files');
-    const folder = DriveApp.getFolderById(folderId);
-    const files = filesByName_(folder);
-    const previous = {};
-    if (ss.getSheetByName(ATTACHMENT_TAB)) readTable_(ss, ATTACHMENT_TAB).forEach(r => { previous[r.attachment_id] = r; });
-
-    const counts = {parsed: 0, reused: 0, missing: 0, failed: 0};
-    const rows = [], used = new Set();
-    readTable_(ss, EMAIL_TAB).forEach(email => {
-      splitAttachments_(email.attachment_names).forEach((name, i) => {
-        const id = 'ATT-' + email.message_id + '-' + (i + 1);
-        const file = locateAttachment_(email, name, files, folder);
-        if (file) used.add(file.getId());
-        rows.push(attachmentRow_(id, String(email.message_id), name, file, previous[id], counts));
-      });
-    });
-    // Files no email points to (e.g. Invoice_Dispute_Example.pdf) still get a reviewed row.
-    files.all.filter(f => !used.has(f.getId())).forEach(file => {
-      const id = 'ATT-FILE-' + file.getId().slice(0, 12);
-      rows.push(attachmentRow_(id, '', file.getName(), file, previous[id], counts));
-    });
-
-    writeDerived_(ss, ATTACHMENT_TAB, 'attachment_id', rows);
+    const r = runAttachments_(ss);
     const rebuilt = runBuildRecords_(ss);
-    const detail = 'Attachments: ' + counts.parsed + ' parsed, ' + counts.reused + ' unchanged, ' +
-      counts.missing + ' not found, ' + counts.failed + ' failed. ' + rebuilt.detail;
-    writeLog_(start, 'Attachments', counts.parsed, counts.reused, counts.failed, detail);
+    const detail = r.detail + ' ' + rebuilt.detail;
+    writeLog_(start, 'Attachments', r.counts.parsed, r.counts.reused, r.counts.failed, detail);
     console.log(detail);
-    ss.toast(counts.parsed + ' attachments parsed, ' + counts.missing + ' not found, ' + counts.failed +
+    ss.toast(r.counts.parsed + ' attachments parsed, ' + r.counts.missing + ' not found, ' + r.counts.failed +
       ' failed. Details in Sync Log.', 'SWAG CRM', 8);
   } catch (e) {
     writeLog_(start, 'Failed', 0, 0, 1, 'Attachments: ' + String(e));
@@ -58,6 +34,54 @@ function processAttachments() {
   } finally {
     lock.releaseLock();
   }
+}
+
+/**
+ * Parses every attachment named in the Email Log plus any other file in the
+ * folder, and writes the Attachments tab. Caller holds the script lock.
+ * @return {{counts: Object, failedMessageIds: string[], detail: string}} failedMessageIds:
+ *     messages with a file that could not be read; they stay unprocessed so the next sync retries.
+ */
+function runAttachments_(ss) {
+  const folderId = property_('ATTACHMENTS_FOLDER_ID');
+  if (!folderId) throw new Error('Set Script property ATTACHMENTS_FOLDER_ID to the Drive folder that holds attachment files');
+  const folder = DriveApp.getFolderById(folderId);
+  const files = filesByName_(folder);
+  const previous = {};
+  if (ss.getSheetByName(ATTACHMENT_TAB)) readTable_(ss, ATTACHMENT_TAB).forEach(r => { previous[r.attachment_id] = r; });
+
+  const counts = {parsed: 0, reused: 0, missing: 0, failed: 0};
+  const rows = [], used = new Set(), failedMessageIds = new Set();
+  readTable_(ss, EMAIL_TAB).forEach(email => {
+    splitAttachments_(email.attachment_names).forEach((name, i) => {
+      const id = 'ATT-' + email.message_id + '-' + (i + 1);
+      const failedBefore = counts.failed;
+      let file = null;
+      try {
+        file = locateAttachment_(email, name, files, folder);
+      } catch (e) {
+        counts.failed++;
+        console.error('Could not fetch attachment ' + name + ' for ' + email.message_id + ': ' + e);
+        rows.push({attachment_id: id, message_id: String(email.message_id), filename: name,
+          review_status: REVIEW.NEEDS, review_reason: 'Could not fetch from Gmail: ' + (e && e.message ? e.message : e)});
+        failedMessageIds.add(String(email.message_id));
+        return;
+      }
+      if (file) used.add(file.getId());
+      rows.push(attachmentRow_(id, String(email.message_id), name, file, previous[id], counts));
+      if (counts.failed > failedBefore) failedMessageIds.add(String(email.message_id));
+    });
+  });
+  // Files no email points to (e.g. Invoice_Dispute_Example.pdf) still get a reviewed row.
+  files.all.filter(f => !used.has(f.getId())).forEach(file => {
+    const id = 'ATT-FILE-' + file.getId().slice(0, 12);
+    rows.push(attachmentRow_(id, '', file.getName(), file, previous[id], counts));
+  });
+
+  writeDerived_(ss, ATTACHMENT_TAB, 'attachment_id', rows);
+  const detail = 'Attachments: ' + counts.parsed + ' parsed, ' + counts.reused + ' unchanged, ' +
+    counts.missing + ' not found, ' + counts.failed + ' failed.';
+  return {counts: counts, failedMessageIds: Array.from(failedMessageIds), detail: detail};
 }
 
 /** Index of the folder's files by lower-case name, with and without extension. */

@@ -14,13 +14,26 @@ const DASHBOARD_FIRST_FREE_ROW = 19; // Template uses rows 1-18 for KPIs and row
 const DASHBOARD_EXTRAS = [{
   label: 'Quote value (latest version only)',
   formatFrom: 14, // copy number format from "Customer quote value"
-  formula: col => {
-    const q = name => "'Quotes'!$" + columnLetter_(HEADER_MAP['Quotes'].indexOf(name) + 1) + '$2:$' +
-      columnLetter_(HEADER_MAP['Quotes'].indexOf(name) + 1) + '$5000';
-    return '=SUMIFS(' + q('quoted_total') + ',' + q('sent_at') + ',">="&' + col + '$5,' +
-      q('sent_at') + ',"<"&' + col + '$6,' + q('status') + ',"<>' + QUOTE_STATUS.SUPERSEDED + '")';
-  }
+  formula: col => '=SUMIFS(' + tabColumn_('Quotes', 'quoted_total') + ',' + tabColumn_('Quotes', 'sent_at') + ',">="&' +
+    col + '$5,' + tabColumn_('Quotes', 'sent_at') + ',"<"&' + col + '$6,' + tabColumn_('Quotes', 'status') +
+    ',"<>' + QUOTE_STATUS.SUPERSEDED + '")'
+}, {
+  label: 'Last successful Gmail sync',
+  numberFormat: 'yyyy-mm-dd hh:mm',
+  formula: col => col !== 'B' ? '' : '=IF(COUNTIF(' + tabColumn_(SYNC_TAB, 'status') + ',"Success")=0,"never",MAXIFS(' +
+    tabColumn_(SYNC_TAB, 'finished_at') + ',' + tabColumn_(SYNC_TAB, 'status') + ',"Success"))'
+}, {
+  label: 'Emails waiting to process (retry queue)',
+  numberFormat: '0',
+  formula: col => col !== 'B' ? '' : '=COUNTIFS(' + tabColumn_(EMAIL_TAB, 'message_id') + ',"<>",' +
+    tabColumn_(EMAIL_TAB, 'processed_at') + ',"")'
 }];
+
+/** "'Quotes'!$J$2:$J$5000" for a named column of a tab defined in HEADER_MAP. */
+function tabColumn_(tab, column) {
+  const letter = columnLetter_(HEADER_MAP[tab].indexOf(column) + 1);
+  return "'" + tab + "'!$" + letter + '$2:$' + letter + '$5000';
+}
 
 /** Adds or refreshes the extra Dashboard rows. */
 function ensureDashboardExtras_(ss) {
@@ -36,7 +49,8 @@ function ensureDashboardExtras_(ss) {
     }
     sh.getRange(row, 1).setValue(extra.label);
     sh.getRange(row, 2, 1, 3).setFormulas([['B', 'C', 'D'].map(extra.formula)]);
-    sh.getRange(extra.formatFrom, 1, 1, 4).copyTo(sh.getRange(row, 1, 1, 4), {formatOnly: true});
+    sh.getRange(extra.formatFrom || 14, 1, 1, 4).copyTo(sh.getRange(row, 1, 1, 4), {formatOnly: true});
+    if (extra.numberFormat) sh.getRange(row, 2, 1, 3).setNumberFormat(extra.numberFormat);
   });
 }
 

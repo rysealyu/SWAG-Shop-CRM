@@ -14,56 +14,66 @@ function classifyEmailLog() {
   const start = new Date();
   try {
     const ss = SpreadsheetApp.getActiveSpreadsheet();
-    const sh = ss.getSheetByName(EMAIL_TAB);
-    if (!sh) throw new Error('Email Log is missing. Run setupCRM().');
-    ensureHeaders_(sh, HEADER_MAP[EMAIL_TAB]);
-    const headers = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0].map(String);
-    const col = name => headers.indexOf(name);
-    const n = sh.getLastRow();
-    if (n < 2) { ss.toast('Email Log is empty. Import emails first.', 'SWAG CRM', 5); return; }
-
-    const data = sh.getRange(2, 1, n - 1, headers.length).getValues();
-    const dir = loadDirectory_();
-    const results = [], rowIndex = [];
-    data.forEach((row, i) => {
-      if (row[col('review_status')] === REVIEW.HUMAN) return;
-      results.push(classifyMessage_({
-        message_id: row[col('message_id')], thread_id: row[col('thread_id')], direction: row[col('direction')],
-        from_email: row[col('from_email')], to_email: row[col('to_email')], subject: row[col('subject')],
-        body: row[col('body_excerpt')], attachment_filenames: row[col('attachment_names')]
-      }, dir));
-      rowIndex.push(i);
-    });
-    flagThreadMismatches_(results);
-
-    results.forEach((r, k) => {
-      const row = data[rowIndex[k]];
-      row[col('company_id')] = r.company_id;
-      row[col('contact_id')] = r.contact_id;
-      row[col('classification')] = r.category;
-      row[col('confidence')] = r.confidence;
-      row[col('review_status')] = r.needsReview ? REVIEW.NEEDS : REVIEW.AUTO;
-      row[col('classification_reason')] = r.reason;
-    });
-    sh.getRange(2, 1, data.length, headers.length).setValues(data);
-
-    const optOutsMarked = markOptOuts_(results.filter(r => r.category === CATEGORY.OPT_OUT).map(r => r.counterparty), dir);
-    const counts = {};
-    results.forEach(r => { counts[r.category] = (counts[r.category] || 0) + 1; });
-    const review = results.filter(r => r.needsReview).length;
-    const summary = Object.keys(counts).sort().map(k => k + ': ' + counts[k]).join(', ');
-    const detail = 'Classified ' + results.length + ' (' + (data.length - results.length) + ' human-verified kept). ' +
-      summary + '. Needs review: ' + review + '. Opt-outs newly marked: ' + optOutsMarked + '.';
+    const r = runClassify_(ss);
     // Status 'Classified' (not 'Success') so the Dashboard's sync-run KPI only counts real syncs.
-    writeLog_(start, 'Classified', results.length, data.length - results.length, 0, detail);
-    console.log(detail);
-    ss.toast('Classified ' + results.length + ' emails; ' + review + ' need review. Details in Sync Log.', 'SWAG CRM', 8);
+    writeLog_(start, 'Classified', r.classified, r.kept, 0, r.detail);
+    console.log(r.detail);
+    ss.toast('Classified ' + r.classified + ' emails; ' + r.review + ' need review. Details in Sync Log.', 'SWAG CRM', 8);
   } catch (e) {
     writeLog_(start, 'Failed', 0, 0, 1, 'Classification: ' + String(e));
     throw e;
   } finally {
     lock.releaseLock();
   }
+}
+
+/**
+ * Classifies every Email Log row except 'Human Verified' ones. Caller holds the script lock.
+ * @return {{classified: number, kept: number, review: number, detail: string}}
+ */
+function runClassify_(ss) {
+  const sh = ss.getSheetByName(EMAIL_TAB);
+  if (!sh) throw new Error('Email Log is missing. Run setupCRM().');
+  ensureHeaders_(sh, HEADER_MAP[EMAIL_TAB]);
+  const headers = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0].map(h => String(h).trim());
+  const col = name => headers.indexOf(name);
+  const n = sh.getLastRow();
+  if (n < 2) return {classified: 0, kept: 0, review: 0, detail: 'Email Log is empty; nothing to classify.'};
+
+  const data = sh.getRange(2, 1, n - 1, headers.length).getValues();
+  const dir = loadDirectory_();
+  const results = [], rowIndex = [];
+  data.forEach((row, i) => {
+    if (row[col('review_status')] === REVIEW.HUMAN) return;
+    results.push(classifyMessage_({
+      message_id: row[col('message_id')], thread_id: row[col('thread_id')], direction: row[col('direction')],
+      from_email: row[col('from_email')], to_email: row[col('to_email')], subject: row[col('subject')],
+      body: row[col('body_excerpt')], attachment_filenames: row[col('attachment_names')]
+    }, dir));
+    rowIndex.push(i);
+  });
+  flagThreadMismatches_(results);
+
+  results.forEach((r, k) => {
+    const row = data[rowIndex[k]];
+    row[col('company_id')] = r.company_id;
+    row[col('contact_id')] = r.contact_id;
+    row[col('classification')] = r.category;
+    row[col('confidence')] = r.confidence;
+    row[col('review_status')] = r.needsReview ? REVIEW.NEEDS : REVIEW.AUTO;
+    row[col('classification_reason')] = r.reason;
+  });
+  sh.getRange(2, 1, data.length, headers.length).setValues(data);
+
+  const optOutsMarked = markOptOuts_(results.filter(r => r.category === CATEGORY.OPT_OUT).map(r => r.counterparty), dir);
+  const counts = {};
+  results.forEach(r => { counts[r.category] = (counts[r.category] || 0) + 1; });
+  const review = results.filter(r => r.needsReview).length;
+  const kept = data.length - results.length;
+  const summary = Object.keys(counts).sort().map(k => k + ': ' + counts[k]).join(', ');
+  const detail = 'Classified ' + results.length + ' (' + kept + ' human-verified kept). ' +
+    summary + '. Needs review: ' + review + '. Opt-outs newly marked: ' + optOutsMarked + '.';
+  return {classified: results.length, kept: kept, review: review, detail: detail};
 }
 
 /** Builds the classifier directory from the Contacts, Customers and Suppliers tabs. */
