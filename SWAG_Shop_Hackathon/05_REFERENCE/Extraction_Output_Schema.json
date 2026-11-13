@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "SWAG Shop extracted email activity",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["message_id", "thread_id", "classification", "confidence", "needs_human_review", "evidence", "entities"],
+  "properties": {
+    "message_id": {"type": "string"},
+    "thread_id": {"type": "string"},
+    "classification": {"enum": ["inquiry", "customer_quote_sent", "supplier_quote_received", "confirmed_order", "ambiguous_approval", "order_update", "follow_up", "opt_out", "other"]},
+    "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+    "needs_human_review": {"type": "boolean"},
+    "review_reason": {"type": ["string", "null"]},
+    "company_name": {"type": ["string", "null"]},
+    "contact_email": {"type": ["string", "null"]},
+    "quote_id": {"type": ["string", "null"]},
+    "po_number": {"type": ["string", "null"]},
+    "entities": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["product", "quantity", "product_color", "imprint_color", "imprint_location", "ship_to", "in_hand_date", "unit_price", "setup_fee", "freight", "amount", "currency", "supplier_net_cost", "lead_time", "minimum_order_quantity"],
+      "properties": {
+        "product": {"type": ["string", "null"]},
+        "quantity": {"type": ["integer", "null"], "minimum": 0},
+        "product_color": {"type": ["string", "null"]},
+        "imprint_color": {"type": ["string", "null"]},
+        "imprint_location": {"type": ["string", "null"]},
+        "ship_to": {"type": ["string", "null"]},
+        "in_hand_date": {"type": ["string", "null"]},
+        "unit_price": {"type": ["number", "null"]},
+        "setup_fee": {"type": ["number", "null"]},
+        "freight": {"type": ["number", "null"]},
+        "amount": {"type": ["number", "null"]},
+        "currency": {"type": ["string", "null"]},
+        "supplier_net_cost": {"type": ["number", "null"]},
+        "lead_time": {"type": ["string", "null"]},
+        "minimum_order_quantity": {"type": ["integer", "null"]}
+      }
+    },
+    "evidence": {
+      "type": "array",
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["source_message_id", "source_attachment", "field", "quote_or_snippet"],
+        "properties": {
+          "source_message_id": {"type": "string"},
+          "source_attachment": {"type": ["string", "null"]},
+          "field": {"type": "string"},
+          "quote_or_snippet": {"type": "string"}
+        }
+      }
+    }
+  }
+}
