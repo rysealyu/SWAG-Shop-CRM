@@ -40,6 +40,8 @@ function onOpen() {
     .addSeparator()
     .addItem('Sync Gmail now (authorized test account)', 'syncNow')
     .addItem('Install daily sync trigger', 'installDailySync')
+    .addSeparator()
+    .addItem('Reset demo data (asks first)', 'resetDemoData')
     .addToUi();
 }
 
@@ -129,7 +131,9 @@ function importSampleCsv() {
     const fileId=property_('SAMPLE_EMAIL_CSV_FILE_ID');
     if (!fileId) throw new Error('Set Script property SAMPLE_EMAIL_CSV_FILE_ID to an authorized Drive CSV file ID');
     const rows=Utilities.parseCsv(DriveApp.getFileById(fileId).getBlob().getDataAsString('UTF-8').replace(/^\uFEFF/,''));
-    const header=rows.shift();
+    const header=(rows.shift()||[]).map(h=>String(h).trim());
+    const needed=['message_id','thread_id','date_time','direction'].filter(h=>header.indexOf(h)<0);
+    if (needed.length) throw new Error('Invalid CSV: missing column(s) '+needed.join(', ')+'. Row 1 has: '+header.join(', '));
     const known=getExistingMessageIds_();
     const dateIndex=header.indexOf('date_time');
     const imported=rows.filter(x=>x.some(Boolean)).map(cells=>{
@@ -142,8 +146,11 @@ function importSampleCsv() {
     const r=addBatch_(imported,known);added=r.added;skipped=r.skipped;
     // 'Imported', not 'Success': the Dashboard's "Successful sync runs" should count Gmail syncs only.
     writeLog_(start,'Imported',added,skipped,0,'Sample CSV imported. Run "Classify emails" to label new rows.');
+    SpreadsheetApp.getActiveSpreadsheet().toast('Added '+added+' emails, skipped '+skipped+
+      ' already in the Email Log. Next: Classify emails.','SWAG CRM',8);
   } catch(e) {
     writeLog_(start,'Failed',added,skipped,1,String(e));
+    SpreadsheetApp.getActiveSpreadsheet().toast('Import failed: '+String(e).slice(0,200),'SWAG CRM',15);
     throw e;
   } finally {lock.releaseLock();}
 }
