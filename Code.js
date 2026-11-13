@@ -22,7 +22,7 @@ const HEADER_MAP = {
  'Orders':['order_id','company_id','quote_id','order_date','po_number','product','quantity','unit_price','freight','confirmed_order_total','status','source_message_id','quote_link_basis','amount_basis','review_reason','manual_lock'],
  'Supplier Quotes':['supplier_quote_id','supplier_id','customer_opportunity_id','received_at','product','quantity','unit_cost','setup_cost','freight_cost','moq','lead_time','source_message_id','link_basis','doc_check','manual_lock'],
  'Attachments':['attachment_id','message_id','filename','mime_type','drive_url','extracted_fields_json','parsed_at','review_status','sha256','document_type','company_id','opportunity_id','quote_id','missing_fields','review_reason','manual_lock'],
- 'Follow Ups':['task_id','company_id','contact_email','due_date','reason','priority','status','source_thread_id','draft_subject','draft_body','approved','evidence_message_ids','gmail_draft_id'],
+ 'Follow Ups':['task_id','company_id','contact_email','due_date','reason','priority','status','source_thread_id','draft_subject','draft_body','approved','evidence_message_ids','manual_lock'],
  'Sync Log':['run_id','started_at','finished_at','status','processed_count','skipped_duplicate_count','error_count','details'],
  'Settings':['setting','value','notes'],
  'Suppliers':['supplier_id','supplier_name','email','category','region','notes']
@@ -36,8 +36,7 @@ function onOpen() {
     .addItem('Classify emails', 'classifyEmailLog')
     .addItem('Build quotes, orders & opportunities', 'buildCrmRecords')
     .addItem('Process attachments (PDF, Excel, images)', 'processAttachments')
-    .addItem('Generate follow-up drafts (top 10, not sent)', 'generateFollowUps')
-    .addItem('Create Gmail drafts for approved follow-ups', 'createApprovedFollowUpDrafts')
+    .addItem('Draft 10 follow-ups (nothing is sent)', 'buildFollowUps')
     .addSeparator()
     .addItem('Sync Gmail now (authorized test account)', 'syncNow')
     .addItem('Install daily sync trigger', 'installDailySync')
@@ -63,17 +62,31 @@ function ensureTab_(ss, name) {
   }
   return sh;
 }
-/** Appends any header in `headers` missing from row 1 (sheets made from an older template). */
+/**
+ * Adds any header in `headers` missing from row 1. A missing header whose
+ * template column is blank is restored in place (e.g. an emptied A1); the rest
+ * are appended after the last header (sheets made from an older template).
+ */
 function ensureHeaders_(sh, headers) {
   const width = Math.max(sh.getLastColumn(), 1);
   const present = sh.getRange(1, 1, 1, width).getValues()[0].map(h => String(h).trim());
   const missing = headers.filter(h => present.indexOf(h) < 0);
   if (!missing.length) return;
+  const style = range => range.setBackground('#143e4b').setFontColor('#ffffff').setFontWeight('bold');
+  const append = [];
+  missing.forEach(h => {
+    const home = headers.indexOf(h);
+    if (home < present.length && !present[home]) {
+      style(sh.getRange(1, home + 1).setValue(h));
+      present[home] = h;
+    } else {
+      append.push(h);
+    }
+  });
+  if (!append.length) return;
   let last = present.length;
   while (last > 0 && !present[last - 1]) last--;
-  const at = last + 1;
-  sh.getRange(1, at, 1, missing.length).setValues([missing])
-    .setBackground('#143e4b').setFontColor('#ffffff').setFontWeight('bold');
+  style(sh.getRange(1, last + 1, 1, append.length).setValues([append]));
 }
 
 function property_(name) {

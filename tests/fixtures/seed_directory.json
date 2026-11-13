@@ -1,0 +1,341 @@
+{
+  "contacts": [
+    {
+      "contact_id": "C-001",
+      "company_id": "A-001",
+      "full_name": "Sarah Moore",
+      "email": "sarah.moore@acme-events.example",
+      "marketing_opt_out": false
+    },
+    {
+      "contact_id": "C-002",
+      "company_id": "A-002",
+      "full_name": "David Chen",
+      "email": "david.chen@northstar-retail.example",
+      "marketing_opt_out": false
+    },
+    {
+      "contact_id": "C-003",
+      "company_id": "A-003",
+      "full_name": "Angela Brooks",
+      "email": "angela.brooks@meridian-credit.example",
+      "marketing_opt_out": false
+    },
+    {
+      "contact_id": "C-004",
+      "company_id": "A-004",
+      "full_name": "Noah Patel",
+      "email": "noah.patel@cedar-labs.example",
+      "marketing_opt_out": false
+    },
+    {
+      "contact_id": "C-005",
+      "company_id": "A-005",
+      "full_name": "Emily Rivera",
+      "email": "emily.rivera@harbor-tech.example",
+      "marketing_opt_out": false
+    },
+    {
+      "contact_id": "C-006",
+      "company_id": "A-006",
+      "full_name": "Jordan Hill",
+      "email": "jordan.hill@peak-wellness.example",
+      "marketing_opt_out": false
+    },
+    {
+      "contact_id": "C-007",
+      "company_id": "A-007",
+      "full_name": "Mia Stone",
+      "email": "mia.stone@birch-hospitality.example",
+      "marketing_opt_out": false
+    },
+    {
+      "contact_id": "C-008",
+      "company_id": "A-008",
+      "full_name": "Olivia James",
+      "email": "olivia.james@summit-schools.example",
+      "marketing_opt_out": false
+    },
+    {
+      "contact_id": "C-009",
+      "company_id": "A-009",
+      "full_name": "Marcus Bell",
+      "email": "marcus.bell@cypress-services.example",
+      "marketing_opt_out": false
+    },
+    {
+      "contact_id": "C-010",
+      "company_id": "A-010",
+      "full_name": "Priya Shah",
+      "email": "priya.shah@atlas-distribution.example",
+      "marketing_opt_out": false
+    },
+    {
+      "contact_id": "C-011",
+      "company_id": "A-011",
+      "full_name": "Sophie Grant",
+      "email": "sophie.grant@willow-energy.example",
+      "marketing_opt_out": false
+    },
+    {
+      "contact_id": "C-012",
+      "company_id": "A-012",
+      "full_name": "Nathan Reed",
+      "email": "nathan.reed@skyline-marketing.example",
+      "marketing_opt_out": false
+    },
+    {
+      "contact_id": "C-013",
+      "company_id": "A-013",
+      "full_name": "Evelyn Lee",
+      "email": "evelyn.lee@orbit-financial.example",
+      "marketing_opt_out": false
+    },
+    {
+      "contact_id": "C-014",
+      "company_id": "A-014",
+      "full_name": "Christopher Wright",
+      "email": "christopher.wright@suncrest-outdoors.example",
+      "marketing_opt_out": false
+    },
+    {
+      "contact_id": "C-015",
+      "company_id": "A-015",
+      "full_name": "Ava Roberts",
+      "email": "ava.roberts@goldenbridge-events.example",
+      "marketing_opt_out": false
+    },
+    {
+      "contact_id": "C-016",
+      "company_id": "A-016",
+      "full_name": "Daniel Young",
+      "email": "daniel.young@blueprint-logistics.example",
+      "marketing_opt_out": false
+    },
+    {
+      "contact_id": "C-017",
+      "company_id": "A-017",
+      "full_name": "Isabella Carter",
+      "email": "isabella.carter@shoreline-medical.example",
+      "marketing_opt_out": false
+    },
+    {
+      "contact_id": "C-018",
+      "company_id": "A-018",
+      "full_name": "Leo Kim",
+      "email": "leo.kim@eastwind-travel.example",
+      "marketing_opt_out": false
+    },
+    {
+      "contact_id": "C-019",
+      "company_id": "A-019",
+      "full_name": "Grace Adams",
+      "email": "grace.adams@marblewood-group.example",
+      "marketing_opt_out": false
+    },
+    {
+      "contact_id": "C-020",
+      "company_id": "A-020",
+      "full_name": "Benjamin Clark",
+      "email": "benjamin.clark@riverside-consulting.example",
+      "marketing_opt_out": false
+    }
+  ],
+  "customers": [
+    {
+      "company_id": "A-001",
+      "company_name": "Acme Events",
+      "domain": "acme-events.example",
+      "status": "Active"
+    },
+    {
+      "company_id": "A-002",
+      "company_name": "Northstar Retail",
+      "domain": "northstar-retail.example",
+      "status": "Active"
+    },
+    {
+      "company_id": "A-003",
+      "company_name": "Meridian Credit Union",
+      "domain": "meridian-credit.example",
+      "status": "Active"
+    },
+    {
+      "company_id": "A-004",
+      "company_name": "Cedar Labs",
+      "domain": "cedar-labs.example",
+      "status": "Active"
+    },
+    {
+      "company_id": "A-005",
+      "company_name": "Harbor Technology",
+      "domain": "harbor-tech.example",
+      "status": "Active"
+    },
+    {
+      "company_id": "A-006",
+      "company_name": "Peak Wellness",
+      "domain": "peak-wellness.example",
+      "status": "Active"
+    },
+    {
+      "company_id": "A-007",
+      "company_name": "Birch Hospitality",
+      "domain": "birch-hospitality.example",
+      "status": "Active"
+    },
+    {
+      "company_id": "A-008",
+      "company_name": "Summit Schools",
+      "domain": "summit-schools.example",
+      "status": "Active"
+    },
+    {
+      "company_id": "A-009",
+      "company_name": "Cypress Services",
+      "domain": "cypress-services.example",
+      "status": "Active"
+    },
+    {
+      "company_id": "A-010",
+      "company_name": "Atlas Distribution",
+      "domain": "atlas-distribution.example",
+      "status": "Active"
+    },
+    {
+      "company_id": "A-011",
+      "company_name": "Willow Energy",
+      "domain": "willow-energy.example",
+      "status": "Active"
+    },
+    {
+      "company_id": "A-012",
+      "company_name": "Skyline Marketing",
+      "domain": "skyline-marketing.example",
+      "status": "Active"
+    },
+    {
+      "company_id": "A-013",
+      "company_name": "Orbit Financial",
+      "domain": "orbit-financial.example",
+      "status": "Dormant"
+    },
+    {
+      "company_id": "A-014",
+      "company_name": "Suncrest Outdoors",
+      "domain": "suncrest-outdoors.example",
+      "status": "Dormant"
+    },
+    {
+      "company_id": "A-015",
+      "company_name": "Goldenbridge Events",
+      "domain": "goldenbridge-events.example",
+      "status": "Dormant"
+    },
+    {
+      "company_id": "A-016",
+      "company_name": "Blueprint Logistics",
+      "domain": "blueprint-logistics.example",
+      "status": "Dormant"
+    },
+    {
+      "company_id": "A-017",
+      "company_name": "Shoreline Medical",
+      "domain": "shoreline-medical.example",
+      "status": "Dormant"
+    },
+    {
+      "company_id": "A-018",
+      "company_name": "Eastwind Travel",
+      "domain": "eastwind-travel.example",
+      "status": "Dormant"
+    },
+    {
+      "company_id": "A-019",
+      "company_name": "Marblewood Group",
+      "domain": "marblewood-group.example",
+      "status": "Dormant"
+    },
+    {
+      "company_id": "A-020",
+      "company_name": "Riverside Consulting",
+      "domain": "riverside-consulting.example",
+      "status": "Dormant"
+    }
+  ],
+  "historical_orders": [
+    {
+      "order_id": "ORDER-2025-001",
+      "company_id": "A-001",
+      "product": "Canvas tote bags",
+      "quantity": 2000,
+      "sales_value": 6900.0,
+      "order_date": "2025-11-07"
+    },
+    {
+      "order_id": "ORDER-2025-002",
+      "company_id": "A-002",
+      "product": "Stainless drinkware",
+      "quantity": 400,
+      "sales_value": 2700.0,
+      "order_date": "2025-12-10"
+    },
+    {
+      "order_id": "ORDER-2025-003",
+      "company_id": "A-003",
+      "product": "Member mugs",
+      "quantity": 800,
+      "sales_value": 5400.0,
+      "order_date": "2025-10-08"
+    },
+    {
+      "order_id": "ORDER-2026-004",
+      "company_id": "A-007",
+      "product": "Gift boxes",
+      "quantity": 300,
+      "sales_value": 5700.0,
+      "order_date": "2026-04-10"
+    },
+    {
+      "order_id": "ORDER-2026-005",
+      "company_id": "A-008",
+      "product": "Lanyards",
+      "quantity": 1200,
+      "sales_value": 1950.0,
+      "order_date": "2026-06-08"
+    },
+    {
+      "order_id": "ORDER-2026-006",
+      "company_id": "A-011",
+      "product": "Notebooks",
+      "quantity": 600,
+      "sales_value": 2250.0,
+      "order_date": "2026-03-12"
+    },
+    {
+      "order_id": "ORDER-2026-007",
+      "company_id": "A-013",
+      "product": "Travel mugs",
+      "quantity": 1000,
+      "sales_value": 7200.0,
+      "order_date": "2026-02-11"
+    }
+  ],
+  "suppliers": [
+    {
+      "supplier_id": "SUP-001",
+      "supplier_name": "PrintForge Manufacturing",
+      "email": "quotes@printforge.example"
+    },
+    {
+      "supplier_id": "SUP-002",
+      "supplier_name": "Coastal Custom Goods",
+      "email": "sales@coastalcustom.example"
+    },
+    {
+      "supplier_id": "SUP-003",
+      "supplier_name": "Pacific Sourcing Partners",
+      "email": "pricing@pacificsource.example"
+    }
+  ]
+}

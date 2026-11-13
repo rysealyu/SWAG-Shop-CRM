@@ -36,11 +36,20 @@ function importSeedWorkbook() {
       supplier_id: s.supplier_id, supplier_name: s.supplier_name, email: normalizeEmail_(s.email),
       category: s.category, region: s.region, notes: s.notes
     })));
+    // Past orders as 'Historical' rows: follow-up drafts can cite them ("1,000 travel mugs in February"),
+    // and the Dashboard ignores them because it only counts status 'Confirmed'.
+    ensureTab_(ss, 'Orders');
+    const pastOrders = upsertRows_('Orders', 'order_id', history.map(o => ({
+      order_id: o.order_id, company_id: o.company_id, order_date: o.order_date, product: o.product,
+      quantity: Number(o.quantity), confirmed_order_total: Number(o.sales_value), status: ORDER_STATUS.HISTORICAL,
+      amount_basis: 'Seed workbook Historical_Orders (' + o.fulfillment_status + ')'
+    })));
 
     const detail = 'Seed workbook imported. Customers +' + customers.added + ' (' + customers.enriched + ' enriched), ' +
       'Contacts +' + contacts.added + ' (' + contacts.enriched + ' enriched), ' +
-      'Suppliers +' + supplierRows.added + ' (' + supplierRows.enriched + ' enriched).';
-    writeLog_(start, 'Imported', customers.added + contacts.added + supplierRows.added, 0, 0, detail);
+      'Suppliers +' + supplierRows.added + ' (' + supplierRows.enriched + ' enriched), ' +
+      'Historical orders +' + pastOrders.added + '.';
+    writeLog_(start, 'Imported', customers.added + contacts.added + supplierRows.added + pastOrders.added, 0, 0, detail);
     ss.toast(detail, 'SWAG CRM', 8);
   } catch (e) {
     writeLog_(start, 'Failed', 0, 0, 1, String(e));

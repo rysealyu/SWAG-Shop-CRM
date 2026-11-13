@@ -1,0 +1,293 @@
+{
+  "pdf": {
+    "Customer_Product_Brief_Tumblers.pdf": [
+      "Product Brief: Branded Tumblers",
+      "SWAG Shop Hackathon | SYNTHETIC SAMPLE - NOT A REAL TRANSACTION",
+      "Customer",
+      "Northstar Retail",
+      "Product",
+      "20 oz insulated stainless tumblers, navy",
+      "Quantity",
+      "500",
+      "Logo",
+      "White, one location, screen print",
+      "Ship to",
+      "Denver, CO 80202",
+      "In-hand date",
+      "December 8, 2026",
+      "Notes",
+      "Customer requests written quote with setup and delivery, see attached artwork."
+    ],
+    "Invoice_Dispute_Example.pdf": [
+      "Invoice Review: Shipping and Setup",
+      "SWAG Shop Hackathon | SYNTHETIC SAMPLE - NOT A REAL TRANSACTION",
+      "Account",
+      "Acme Events",
+      "Product",
+      "Carabiner keychains",
+      "Quoted quantity",
+      "600",
+      "Purchase order quantity",
+      "500",
+      "Previous setup charge",
+      "$50.00",
+      "Customer question",
+      "Why does the invoice not match the purchase order?",
+      "Required decision",
+      "Do not mark approved; request confirmation before changing or sending invoice."
+    ],
+    "PO-2501_Purchase_Order.pdf": [
+      "Purchase Order: PO-2501",
+      "SWAG Shop Hackathon | SYNTHETIC SAMPLE - NOT A REAL TRANSACTION",
+      "Company",
+      "Northstar Retail",
+      "PO Number",
+      "PO-2501",
+      "Product",
+      "Custom 20 oz Navy Tumblers",
+      "Quantity",
+      "500",
+      "Unit Price (USD)",
+      "6.95",
+      "Line Total (USD)",
+      "3,475.00",
+      "Delivery Needed",
+      "December 8, 2026",
+      "Shipping destination",
+      "See account address",
+      "Approval",
+      "SAMPLE PO: contains fictional customer approval"
+    ],
+    "PO-2502_Purchase_Order.pdf": [
+      "Purchase Order: PO-2502",
+      "SWAG Shop Hackathon | SYNTHETIC SAMPLE - NOT A REAL TRANSACTION",
+      "Company",
+      "Harbor Technology",
+      "PO Number",
+      "PO-2502",
+      "Product",
+      "Branded Laptop Sleeves",
+      "Quantity",
+      "300",
+      "Unit Price (USD)",
+      "12.50",
+      "Line Total (USD)",
+      "3,750.00",
+      "Delivery Needed",
+      "December 2, 2026",
+      "Shipping destination",
+      "See account address",
+      "Approval",
+      "SAMPLE PO: contains fictional customer approval"
+    ],
+    "PO-2503_Purchase_Order.pdf": [
+      "Purchase Order: PO-2503",
+      "SWAG Shop Hackathon | SYNTHETIC SAMPLE - NOT A REAL TRANSACTION",
+      "Company",
+      "Birch Hospitality",
+      "PO Number",
+      "PO-2503",
+      "Product",
+      "Custom Welcome Gift Boxes",
+      "Quantity",
+      "400",
+      "Unit Price (USD)",
+      "18.25",
+      "Line Total (USD)",
+      "7,300.00",
+      "Delivery Needed",
+      "December 17, 2026",
+      "Shipping destination",
+      "See account address",
+      "Approval",
+      "SAMPLE PO: contains fictional customer approval"
+    ],
+    "PO-2504_Purchase_Order.pdf": [
+      "Purchase Order: PO-2504",
+      "SWAG Shop Hackathon | SYNTHETIC SAMPLE - NOT A REAL TRANSACTION",
+      "Company",
+      "Summit Schools",
+      "PO Number",
+      "PO-2504",
+      "Product",
+      "Event Lanyards",
+      "Quantity",
+      "1000",
+      "Unit Price (USD)",
+      "1.65",
+      "Line Total (USD)",
+      "1,650.00",
+      "Delivery Needed",
+      "December 1, 2026",
+      "Shipping destination",
+      "See account address",
+      "Approval",
+      "SAMPLE PO: contains fictional customer approval"
+    ],
+    "Supplier_Quote_Lanyards.pdf": [
+      "Supplier Pricing: Event Lanyards",
+      "SWAG Shop Hackathon | SYNTHETIC SAMPLE - NOT A REAL TRANSACTION",
+      "Supplier",
+      "Pacific Sourcing Partners",
+      "Product",
+      "3/4 in dye-sublimated lanyards with safety breakaway",
+      "Quantity",
+      "1,000",
+      "Unit cost",
+      "$0.92",
+      "Setup",
+      "$30",
+      "Freight",
+      "$75",
+      "Production",
+      "8 business days",
+      "Notes",
+      "Customer deadline cannot be guaranteed until shipping method verified."
+    ],
+    "Supplier_Quote_Totes.pdf": [
+      "Supplier Pricing: Canvas Tote Bags",
+      "SWAG Shop Hackathon | SYNTHETIC SAMPLE - NOT A REAL TRANSACTION",
+      "Supplier",
+      "Coastal Custom Goods",
+      "Product",
+      "12 oz cotton canvas tote; natural, two-sided print",
+      "Quantity",
+      "2,500",
+      "Unit cost",
+      "$3.15",
+      "Setup",
+      "$65",
+      "Estimated freight",
+      "$210",
+      "Lead time",
+      "12 business days after approved artwork",
+      "MOQ",
+      "500",
+      "Alternative quantity",
+      "5,000 units at $2.70 each"
+    ],
+    "Supplier_Quote_Tumblers.pdf": [
+      "Supplier Pricing: Tumblers",
+      "SWAG Shop Hackathon | SYNTHETIC SAMPLE - NOT A REAL TRANSACTION",
+      "Supplier",
+      "PrintForge Manufacturing",
+      "Product",
+      "20 oz stainless tumbler, navy",
+      "Quantity",
+      "500",
+      "Unit cost",
+      "$5.40",
+      "One-time setup",
+      "$55.00",
+      "Freight to Denver",
+      "$180.00",
+      "Production lead time",
+      "10-12 business days after proof approval",
+      "Price validity",
+      "7 calendar days",
+      "Minimum order",
+      "250 units",
+      "Supplier COSTS only, not a customer-facing selling price. Retail pricing must be calculated using SWAG Shop pricing",
+      "rules."
+    ]
+  },
+  "xlsx": {
+    "Laptop_Sleeves_Request.xlsx": {
+      "Request": [
+        [
+          "attribute",
+          "value"
+        ],
+        [
+          "Customer",
+          "Harbor Technology"
+        ],
+        [
+          "Product",
+          "Laptop Sleeve"
+        ],
+        [
+          "Color",
+          "Black"
+        ],
+        [
+          "Quantity",
+          "300"
+        ],
+        [
+          "Size",
+          "15.6 inch"
+        ],
+        [
+          "Imprint",
+          "Full color"
+        ],
+        [
+          "Need By",
+          "2026-12-02"
+        ],
+        [
+          "Ship To",
+          "Austin, Texas"
+        ]
+      ]
+    },
+    "Tumbler_Request.xlsx": {
+      "Request": [
+        [
+          "attribute",
+          "requested_value"
+        ],
+        [
+          "Customer",
+          "Northstar Retail"
+        ],
+        [
+          "Product",
+          "20 oz insulated stainless tumbler"
+        ],
+        [
+          "Product Color",
+          "Navy"
+        ],
+        [
+          "Quantity",
+          "500"
+        ],
+        [
+          "Imprint Color",
+          "White"
+        ],
+        [
+          "Imprint Location",
+          "One side"
+        ],
+        [
+          "In-Hand Date",
+          "2026-12-08"
+        ],
+        [
+          "Ship To",
+          "Denver, CO 80202"
+        ]
+      ],
+      "Options": [
+        [
+          "option",
+          "quantity",
+          "special_requirement"
+        ],
+        [
+          "Sample",
+          "1",
+          "Photo proof acceptable"
+        ],
+        [
+          "Bulk",
+          "500",
+          "No substitutions without approval"
+        ]
+      ]
+    }
+  }
+}

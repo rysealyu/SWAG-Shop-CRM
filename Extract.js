@@ -16,7 +16,7 @@
  */
 
 const QUOTE_STATUS = Object.freeze({SENT: 'Sent', SUPERSEDED: 'Superseded', ACCEPTED: 'Accepted'});
-const ORDER_STATUS = Object.freeze({CONFIRMED: 'Confirmed', REVIEW: 'Needs Review'});
+const ORDER_STATUS = Object.freeze({CONFIRMED: 'Confirmed', REVIEW: 'Needs Review', HISTORICAL: 'Historical'});
 const STAGE = Object.freeze({QUOTED: 'Quoted', APPROVAL_PENDING: 'Approval Pending', WON: 'Won'});
 
 const EXTRACT = Object.freeze({

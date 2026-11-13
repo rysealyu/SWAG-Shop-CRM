@@ -1,26 +1,54 @@
 /**
- * Writes the Follow Ups tab from buildFollowUps_ (FollowUps.js). Safe to re-run:
- * rows are keyed on task_id and refreshed in place. A row a person has touched
- * (approved = TRUE, or status changed from Open) is never overwritten. Open,
- * unapproved rows that no longer qualify are marked Not Needed, not deleted.
- *
- * Nothing is sent. "Create Gmail drafts" only saves drafts for approved rows,
- * for a person to review and send from Gmail.
+ * Writes the Follow Ups tab from buildFollowUps_ (FollowUps.js). Draft-only:
+ * nothing is sent. Rows a person has handled (status changed from Open,
+ * approved = TRUE, or manual_lock = TRUE) are never overwritten. An Open,
+ * unapproved row that is no longer recommended (e.g. the customer replied)
+ * is marked Withdrawn rather than deleted.
  */
 
 const FOLLOW_UP_TAB = 'Follow Ups';
 
-/** Menu action: rank customers and write up to 10 follow-up drafts. */
-function generateFollowUps() {
+/** Menu action: rank follow-ups and (re)draft the top 10. */
+function buildFollowUps() {
   const lock = LockService.getScriptLock();
   if (!lock.tryLock(10000)) throw new Error('Another import or classification is running');
   const start = new Date();
   try {
     const ss = SpreadsheetApp.getActiveSpreadsheet();
-    const result = runFollowUps_(ss);
-    writeLog_(start, 'Follow-ups', result.added + result.updated, result.kept, 0, result.detail);
-    console.log(result.detail);
-    ss.toast(result.tasks + ' follow-up drafts ready for review (none sent). Details in Sync Log.', 'SWAG CRM', 8);
+    const tab = name => (ss.getSheetByName(name) ? readTable_(ss, name) : []);
+    const messages = tab(EMAIL_TAB).map(r => ({
+      message_id: String(r.message_id), thread_id: String(r.thread_id), date_time: r.date_time, direction: r.direction,
+      from_email: r.from_email, to_email: r.to_email, subject: r.subject, body: r.body_excerpt,
+      category: r.classification, company_id: r.company_id, contact_id: r.contact_id, reason: r.classification_reason
+    }));
+    if (!messages.some(m => m.category && m.category !== 'Unclassified')) {
+      throw new Error('No classified emails yet. Run "Classify emails" and "Build quotes, orders & opportunities" first.');
+    }
+    const result = buildFollowUps_({
+      messages: messages, opportunities: tab('Opportunities'), quotes: tab('Quotes'), orders: tab('Orders'),
+      contacts: tab('Contacts'), customers: tab('Customers')
+    }, {now: new Date(), businessName: setting_(ss, 'business_name') || 'SWAG Shop'});
+
+    const existing = {};
+    tab(FOLLOW_UP_TAB).forEach(r => { existing[r.task_id] = r; });
+    const handled = r => Boolean(r) && (r.status !== TASK_STATUS.OPEN || isTrue_(r.approved));
+    const fresh = new Set(result.tasks.map(t => t.task_id));
+    const drafts = result.tasks.filter(t => !handled(existing[t.task_id]));
+    const withdrawn = Object.keys(existing).filter(id => id && !fresh.has(id) && !handled(existing[id])).map(id => ({
+      task_id: id, status: TASK_STATUS.WITHDRAWN,
+      reason: 'Withdrawn ' + start.toDateString() + ': no longer in the top recommendations. Was: ' + existing[id].reason
+    }));
+    const written = writeDerived_(ss, FOLLOW_UP_TAB, 'task_id', drafts.concat(withdrawn));
+    addCheckboxes_(ss.getSheetByName(FOLLOW_UP_TAB), ['approved', 'manual_lock']);
+
+    const skipped = result.excluded.map(e => e.company_name + ' (' + e.reason + ')').join('; ');
+    const detail = 'Follow-ups: ' + result.tasks.length + ' recommended, ' + drafts.length + ' drafted (' + written.added +
+      ' new, ' + written.updated + ' updated, ' + written.locked + ' locked), ' +
+      (result.tasks.length - drafts.length) + ' already handled by a person, ' + withdrawn.length +
+      ' withdrawn. Nothing was sent. Not drafted: ' + (skipped || 'none') + '.';
+    writeLog_(start, 'Follow-ups', drafts.length, result.tasks.length - drafts.length, 0, detail);
+    console.log(detail);
+    ss.toast(drafts.length + ' follow-up drafts ready for review in "' + FOLLOW_UP_TAB + '". Nothing was sent.', 'SWAG CRM', 8);
   } catch (e) {
     writeLog_(start, 'Failed', 0, 0, 1, 'Follow-ups: ' + String(e));
     throw e;
@@ -29,125 +57,20 @@ function generateFollowUps() {
   }
 }
 
-/**
- * Builds and writes follow-ups. Caller holds the script lock.
- * @return {{tasks: number, added: number, updated: number, kept: number, retired: number, detail: string}}
- */
-function runFollowUps_(ss) {
-  const tab = name => ss.getSheetByName(name) ? readTable_(ss, name) : [];
-  const log = tab(EMAIL_TAB);
-  if (!log.some(r => r.classification && r.classification !== 'Unclassified')) {
-    throw new Error('No classified emails yet. Run "Classify emails" first.');
-  }
-  const str = v => String(v === null || v === undefined ? '' : v).trim();
-  const messages = log.map(r => ({
-    message_id: str(r.message_id), thread_id: str(r.thread_id), date_time: r.date_time, direction: r.direction,
-    from_email: r.from_email, to_email: r.to_email, subject: r.subject, body: r.body_excerpt,
-    category: r.classification, company_id: str(r.company_id), contact_id: str(r.contact_id),
-    reason: r.classification_reason
-  }));
-  const ids = rows => rows.map(r => Object.assign({}, r, {company_id: str(r.company_id)}));
-  const input = {
-    messages: messages,
-    customers: ids(tab('Customers')),
-    contacts: ids(tab('Contacts')),
-    opportunities: ids(tab('Opportunities')),
-    quotes: ids(tab('Quotes')).map(q => Object.assign(q, {source_message_id: str(q.source_message_id)})),
-    orders: ids(tab('Orders'))
-  };
-  const result = buildFollowUps_(input, new Date(), {signature: property_('SENDER_NAME') || 'SWAG Shop Sales'});
-  const written = writeFollowUps_(ss, result.tasks);
-
-  const skips = result.skipped.map(s => s.company_id + ' (' + s.reason + ')').join('; ');
-  const detail = result.tasks.length + ' follow-ups: +' + written.added + ' new, ' + written.updated + ' refreshed, ' +
-    written.kept + ' kept as edited by a person, ' + written.retired + ' marked Not Needed. ' +
-    (input.opportunities.length ? '' : 'Opportunities tab is empty: run "Build quotes, orders & opportunities" for quote follow-ups. ') +
-    'Skipped: ' + (skips || 'none') + '.';
-  return {tasks: result.tasks.length, added: written.added, updated: written.updated, kept: written.kept,
-    retired: written.retired, detail: detail};
+/** Value of a row in the Settings tab (setting | value | notes), or ''. */
+function setting_(ss, name) {
+  if (!ss.getSheetByName('Settings')) return '';
+  const row = readTable_(ss, 'Settings').find(r => String(r.setting).trim() === name);
+  return row ? String(row.value).trim() : '';
 }
 
-/** Upserts tasks on task_id, protecting rows a person has approved or closed. */
-function writeFollowUps_(ss, tasks) {
-  const sh = ensureTab_(ss, FOLLOW_UP_TAB);
-  ensureHeaders_(sh, HEADER_MAP[FOLLOW_UP_TAB]);
-  const headers = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0].map(h => String(h).trim());
-  const col = name => headers.indexOf(name);
+/** Turns TRUE/FALSE columns into checkboxes so approving a draft is one click. */
+function addCheckboxes_(sh, columnNames) {
   const n = sh.getLastRow();
-  const rows = n > 1 ? sh.getRange(2, 1, n - 1, headers.length).getValues() : [];
-  const index = new Map(rows.map((r, i) => [String(r[col('task_id')]).trim(), i]));
-  // Open and Not Needed are set by this code; any other status (Done, Sent, Dismissed...) came from a person.
-  const systemStatus = ['', FOLLOW_UP.STATUS.OPEN, FOLLOW_UP.STATUS.NOT_NEEDED];
-  const touched = row => isTrue_(row[col('approved')]) || systemStatus.indexOf(String(row[col('status')]).trim()) < 0;
-  const cell = v => (v === null || v === undefined ? '' : v);
-
-  let added = 0, updated = 0, kept = 0, retired = 0;
-  const current = new Set();
-  tasks.forEach(t => {
-    current.add(t.task_id);
-    if (!index.has(t.task_id)) {
-      rows.push(headers.map(h => cell(t[h])));
-      index.set(t.task_id, rows.length - 1);
-      added++;
-      return;
-    }
-    const row = rows[index.get(t.task_id)];
-    if (touched(row)) { kept++; return; }
-    // Refresh everything except columns a person owns.
-    headers.forEach((h, i) => { if (h in t && h !== 'approved' && h !== 'gmail_draft_id') row[i] = cell(t[h]); });
-    updated++;
+  if (n < 2) return;
+  const headers = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0].map(h => String(h).trim());
+  columnNames.forEach(name => {
+    const col = headers.indexOf(name);
+    if (col >= 0) sh.getRange(2, col + 1, n - 1, 1).insertCheckboxes();
   });
-  rows.forEach(row => {
-    const id = String(row[col('task_id')]).trim();
-    if (!id || current.has(id) || touched(row) || row[col('status')] === FOLLOW_UP.STATUS.NOT_NEEDED) return;
-    row[col('status')] = FOLLOW_UP.STATUS.NOT_NEEDED;
-    retired++;
-  });
-  if (rows.length) {
-    sh.getRange(2, 1, rows.length, headers.length).setValues(rows);
-    sh.getRange(2, col('due_date') + 1, rows.length, 1).setNumberFormat('yyyy-mm-dd');
-    sh.getRange(2, col('approved') + 1, rows.length, 1).insertCheckboxes();
-  }
-  return {added: added, updated: updated, kept: kept, retired: retired};
-}
-
-/**
- * Menu action: saves a Gmail draft (not sent) for each approved, open follow-up
- * that has no draft yet. Re-checks opt-outs first, in case one arrived since.
- */
-function createApprovedFollowUpDrafts() {
-  const lock = LockService.getScriptLock();
-  if (!lock.tryLock(10000)) throw new Error('Another import or classification is running');
-  const start = new Date();
-  try {
-    const ss = SpreadsheetApp.getActiveSpreadsheet();
-    const sh = ensureTab_(ss, FOLLOW_UP_TAB);
-    ensureHeaders_(sh, HEADER_MAP[FOLLOW_UP_TAB]);
-    const headers = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0].map(h => String(h).trim());
-    const col = name => headers.indexOf(name);
-    const n = sh.getLastRow();
-    if (n < 2) { ss.toast('No follow-ups yet. Run "Generate follow-up drafts" first.', 'SWAG CRM', 5); return; }
-    const rows = sh.getRange(2, 1, n - 1, headers.length).getValues();
-    const optedOut = new Set(readTable_(ss, 'Contacts').filter(c => isTrue_(c.marketing_opt_out))
-      .map(c => normalizeEmail_(c.email)));
-
-    let created = 0, blocked = 0;
-    rows.forEach(row => {
-      if (!isTrue_(row[col('approved')]) || row[col('status')] !== FOLLOW_UP.STATUS.OPEN || row[col('gmail_draft_id')]) return;
-      const to = normalizeEmail_(row[col('contact_email')]);
-      if (!to || optedOut.has(to)) { blocked++; return; }
-      const draft = GmailApp.createDraft(to, String(row[col('draft_subject')]), String(row[col('draft_body')]));
-      row[col('gmail_draft_id')] = draft.getId();
-      created++;
-    });
-    sh.getRange(2, 1, rows.length, headers.length).setValues(rows);
-    const detail = 'Gmail drafts created: ' + created + ' (not sent). Blocked by opt-out or missing address: ' + blocked + '.';
-    writeLog_(start, 'Drafts', created, blocked, 0, detail);
-    ss.toast(detail + ' Review and send them from Gmail.', 'SWAG CRM', 8);
-  } catch (e) {
-    writeLog_(start, 'Failed', 0, 0, 1, 'Gmail drafts: ' + String(e));
-    throw e;
-  } finally {
-    lock.releaseLock();
-  }
 }

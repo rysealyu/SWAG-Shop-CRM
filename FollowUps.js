@@ -1,307 +1,382 @@
 /**
- * Follow-up recommendations and outreach drafts - pure logic, no Google services,
- * so it runs in Node next to Classify.js and Extract.js. FollowUpsRunner.js
- * reads the Sheet, calls buildFollowUps_ and writes the Follow Ups tab.
+ * Follow-up recommendations and draft emails - pure logic, no Google services.
+ * FollowUpsRunner.js reads the CRM tabs, calls buildFollowUps_ and writes the
+ * Follow Ups tab. Nothing here sends email: every task is Open, unapproved.
  *
- * Rules (05_REFERENCE/Example_Outreach_Prompts.md, Agent_SKILL.md):
- *  - Customers only. Suppliers and companies not on the Customers tab are never drafted.
- *  - Skip marketing opt-outs (Contacts flag OR an opt-out email from that address).
- *  - Skip unclear identities: no contact on file for the company.
- *  - Skip active conversations: any message with the customer in the last few days,
- *    or the customer's latest reply asks us to check back later.
- *  - Evidence comes only from messages whose identity is clean (not flagged for
- *    a thread that mixes companies). Flagged messages still count as activity,
- *    so they can suppress a follow-up but never justify one.
- *  - An unanswered customer request is served before anything promotional.
- *  - Drafts never mention supplier costs. Nothing is sent: approved = FALSE.
+ * Candidates (one per company; a second need is folded into the same draft):
+ *   Approval pending  90 + quote value / 500   ("looks good", "need approval")
+ *   Open quote        80 + quote value / 500   (no customer reply since sent)
+ *   Unanswered request 50 + 15 past buyer + 15 bought this product before
+ *                     + days waiting / 3 (max 10)
+ *   Dormant buyer     40 + lifetime order value / 1000 (max 20)
+ * Excluded: marketing opt-outs, suppliers, unclear identities, products the
+ * customer said are on hold, and companies who replied to a quote (the
+ * sequence stops on reply; a person answers them). Someone we emailed in the
+ * last 2 days gets a due date 3 days after that email instead of today.
  */
 
-const FOLLOW_UP = Object.freeze({
-  MAX_TASKS: 10,
-  ACTIVE_DAYS: 3,        // a message within this many days = active conversation, leave it alone
-  HOLD_DAYS: 60,         // "on hold, check back later" suppresses follow-ups for this long
-  QUOTE_WAIT_DAYS: 3,    // follow up on an unanswered quote this long after sending it
-  APPROVAL_WAIT_DAYS: 3, // and on a "checking with the team" reply this long after it
-  REQUEST_WAIT_DAYS: 1,  // an unanswered customer request is due the next day
-  MIXED_THREAD: 'Thread mixes different companies',
-  STATUS: Object.freeze({OPEN: 'Open', NOT_NEEDED: 'Not Needed'}),
-  KIND: Object.freeze({APPROVAL: 'approval', QUOTE: 'quote', REQUEST: 'request'})
-});
-
+const FOLLOW_UP = Object.freeze({LIMIT: 10, RECENT_TOUCH_DAYS: 2, WAIT_AFTER_TOUCH_DAYS: 3,
+  DORMANT_ORDER_DAYS: 180, DORMANT_QUIET_DAYS: 60});
+const TASK_STATUS = Object.freeze({OPEN: 'Open', WITHDRAWN: 'Withdrawn'});
+const KIND = Object.freeze({APPROVAL: 'Approval pending', QUOTE: 'Open quote', REQUEST: 'Unanswered request',
+  DORMANT: 'Dormant buyer'});
 const DAY_MS = 24 * 60 * 60 * 1000;
+const IDENTITY_FLAGS = /Thread mixes different companies|not a known customer contact/;
+const NUMBER_WORDS = {one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, ten: 10, fourteen: 14, thirty: 30};
 
 /**
- * Ranks customers who need a follow-up and drafts one message for each.
- * @param {Object} input {messages, customers, contacts, opportunities, quotes, orders}: rows read from
- *     the Email Log (with classification), Customers, Contacts, Opportunities, Quotes and Orders tabs.
- * @param {Date|number} now Reference time; day counts and the active window are measured from it.
- * @param {Object=} options {maxTasks, signature}.
- * @return {{tasks: Object[], skipped: Object[]}} tasks are Follow Ups rows (due_date as a Date at local
- *     midnight); skipped lists {company_id, reason} for every customer left out, for the run log.
+ * Ranks follow-up needs and drafts one email per company.
+ * @param {Object} data {messages, opportunities, quotes, orders, contacts, customers}: CRM tab rows.
+ *     messages are Email Log rows with category/company_id/reason/body.
+ * @param {Object} options {now: Date|string, businessName: string, limit?: number}.
+ * @return {{tasks: Object[], excluded: Object[]}} Up to `limit` Follow Ups rows, plus companies left out and why.
  */
-function buildFollowUps_(input, now, options) {
-  const opts = options || {};
-  const nowTime = toTime_(now);
-  const signature = opts.signature || 'SWAG Shop Sales';
-  const msgs = (input.messages || []).map(m => Object.assign({}, m, {time: toTime_(m.date_time)}))
-    .filter(m => !isNaN(m.time)).sort((a, b) => a.time - b.time);
-  const byThread = groupBy_(msgs, m => m.thread_id);
-  const byCompany = groupBy_(msgs, m => m.company_id);
+function buildFollowUps_(data, options) {
+  const now = toTime_(options.now);
+  const ctx = followUpContext_(data, now);
+  const byCompany = {};
+  const excluded = [];
+  const add = c => (byCompany[c.company_id] = byCompany[c.company_id] || []).push(c);
 
-  const candidates = [], skipped = [];
-  (input.customers || []).forEach(customer => {
-    const id = String(customer.company_id || '').trim();
-    if (!id) return;
-    const ctx = {
-      customer: customer, id: id, nowTime: nowTime, byThread: byThread,
-      msgs: byCompany[id] || [],
-      contact: pickContact_(id, input.contacts || [], byCompany[id] || []),
-      quotes: (input.quotes || []).filter(q => q.company_id === id),
-      opportunities: (input.opportunities || []).filter(o => o.company_id === id),
-      orders: (input.orders || []).filter(o => o.company_id === id && o.status === ORDER_STATUS.CONFIRMED)
-    };
-    const skip = skipReason_(ctx, msgs);
-    if (skip) { skipped.push({company_id: id, reason: skip}); return; }
-    const items = openQuoteItems_(ctx).concat(unansweredRequestItems_(ctx));
-    if (!items.length) { skipped.push({company_id: id, reason: 'Nothing open: no unanswered quote or request'}); return; }
-    items.sort((a, b) => b.score - a.score);
-    candidates.push(toTask_(ctx, items, signature));
+  quoteCandidates_(ctx).forEach(add);
+  requestCandidates_(ctx, excluded).forEach(add);
+  dormantCandidates_(ctx).forEach(add);
+
+  Object.keys(ctx.replied).forEach(companyId => {
+    const reply = ctx.replied[companyId];
+    excluded.push({company_id: companyId, company_name: (ctx.customers[companyId] || {}).company_name || companyId,
+      reason: 'Customer replied on ' + longDate_(reply.time) + ' (' + reply.message_id + '); answer personally, no automated follow-up'});
   });
 
-  candidates.sort((a, b) => b._score - a._score || a.company_id.localeCompare(b.company_id));
-  const max = opts.maxTasks || FOLLOW_UP.MAX_TASKS;
-  candidates.slice(max).forEach((t, i) => {
-    skipped.push({company_id: t.company_id, reason: 'Ranked ' + (max + i + 1) + ' (score ' + t._score + '): ' + t.reason});
+  const tasks = [];
+  Object.keys(byCompany).forEach(companyId => {
+    if (ctx.replied[companyId]) return;
+    const list = byCompany[companyId].sort((a, b) => b.score - a.score);
+    const primary = list[0];
+    const extra = list.find(c => c !== primary && c.kind === KIND.REQUEST && primary.kind !== KIND.REQUEST);
+    const contact = recipient_(ctx, companyId, primary.contact_email);
+    const name = (ctx.customers[companyId] || {}).company_name || companyId;
+    if (!contact) {
+      excluded.push({company_id: companyId, company_name: name, reason: 'Contact opted out of marketing'});
+      return;
+    }
+    const evidence = list.filter(c => c === primary || c === extra).map(c => c.evidence).join(', ');
+    const draft = draftFollowUp_(primary, extra, contact, options.businessName || 'SWAG Shop', now);
+    tasks.push({
+      task_id: 'FU-' + companyId,
+      company_id: companyId,
+      contact_email: contact.email,
+      due_date: dueDate_(ctx, contact.email, now),
+      reason: primary.reason + (extra ? '; also ' + lowerFirst_(extra.reason) : '') +
+        '. Score ' + (primary.score + (extra ? 5 : 0)).toFixed(1),
+      priority: 0,
+      status: TASK_STATUS.OPEN,
+      source_thread_id: primary.thread_id || '',
+      draft_subject: draft.subject,
+      draft_body: draft.body,
+      approved: false,
+      evidence_message_ids: evidence,
+      _score: primary.score + (extra ? 5 : 0),
+      _kind: primary.kind
+    });
   });
-  return {tasks: candidates.slice(0, max), skipped: skipped};
+
+  tasks.sort((a, b) => b._score - a._score);
+  const limit = options.limit || FOLLOW_UP.LIMIT;
+  tasks.slice(limit).forEach(t => excluded.push({company_id: t.company_id,
+    company_name: (ctx.customers[t.company_id] || {}).company_name || t.company_id, reason: 'Ranked below the top ' + limit}));
+  const top = tasks.slice(0, limit);
+  top.forEach((t, i) => { t.priority = i + 1; });
+  ctx.optedOut.forEach(email => excluded.push({company_id: '', company_name: email, reason: 'Opted out: never drafted'}));
+  return {tasks: top, excluded: excluded};
 }
 
-/** Why this customer gets no follow-up, or '' if it is eligible. */
-function skipReason_(ctx, allMsgs) {
-  const c = ctx.contact;
-  if (!c || !normalizeEmail_(c.email)) return 'Unclear identity: no contact email on file';
-  const email = normalizeEmail_(c.email);
-  if (isTrue_(c.marketing_opt_out)) return 'Marketing opt-out (' + email + ')';
-  const optOut = allMsgs.find(m => m.category === CATEGORY.OPT_OUT &&
-    (m.company_id === ctx.id || normalizeEmail_(m.from_email) === email));
-  if (optOut) return 'Marketing opt-out email ' + optOut.message_id;
-  if (!ctx.msgs.length) return 'No email history';
+/** Indexes the CRM rows once. */
+function followUpContext_(data, now) {
+  const customers = {};
+  (data.customers || []).forEach(c => { customers[c.company_id] = c; });
+  const messages = (data.messages || []).map(m => Object.assign({}, m, {time: toTime_(m.date_time)}))
+    .sort((a, b) => a.time - b.time);
+  const byId = {}, byThread = {};
+  messages.forEach(m => {
+    byId[m.message_id] = m;
+    (byThread[m.thread_id] = byThread[m.thread_id] || []).push(m);
+  });
+  const contacts = (data.contacts || []).map(c => Object.assign({}, c, {email: normalizeEmail_(c.email)}));
+  return {
+    now: now, customers: customers, messages: messages, byId: byId, byThread: byThread, contacts: contacts, replied: {},
+    optedOut: contacts.filter(c => isTrue_(c.marketing_opt_out)).map(c => c.email),
+    opportunities: data.opportunities || [], quotes: data.quotes || [],
+    orders: (data.orders || []).filter(o => o.status === ORDER_STATUS.CONFIRMED || o.status === ORDER_STATUS.HISTORICAL)
+  };
+}
 
-  const last = ctx.msgs[ctx.msgs.length - 1];
-  const sinceLast = daysBetween_(last.time, ctx.nowTime);
-  if (sinceLast < FOLLOW_UP.ACTIVE_DAYS) {
-    return 'Active conversation: ' + last.message_id + ' (' + last.direction + ') ' + sinceLast + ' day(s) ago';
+/** Open quotes and ambiguous approvals, from the Opportunities tab. */
+function quoteCandidates_(ctx) {
+  const out = [];
+  ctx.opportunities.forEach(opp => {
+    if (opp.stage !== STAGE.QUOTED && opp.stage !== STAGE.APPROVAL_PENDING) return;
+    if (!ctx.customers[opp.company_id]) return;
+    const quote = ctx.quotes.filter(q => q.opportunity_id === opp.opportunity_id && q.status !== QUOTE_STATUS.SUPERSEDED)
+      .sort((a, b) => toTime_(a.sent_at) - toTime_(b.sent_at)).pop();
+    if (!quote) return;
+    const quoteMsg = ctx.byId[quote.source_message_id] || {};
+    const thread = ctx.byThread[opp.source_thread_id] || [];
+    const sent = toTime_(quote.sent_at);
+    const value = Number(quote.quoted_total) || 0;
+    const facts = {quote: quote, quoteMsg: quoteMsg, thread: thread, sent: sent,
+      revised: Boolean(quote.supersedes), event: eventPhrase_(thread), artworkPending: artworkPending_(thread),
+      validDays: validityDays_(quoteMsg.body)};
+    if (opp.stage === STAGE.APPROVAL_PENDING) {
+      const pending = thread.filter(m => m.time > sent && m.category === CATEGORY.UNCERTAIN).pop();
+      if (!pending || IDENTITY_FLAGS.test(pending.reason || '')) return;
+      out.push(candidate_(KIND.APPROVAL, opp.company_id, 90 + value / 500, pending.from_email, opp.source_thread_id,
+        [quote.source_message_id, pending.message_id].join(', '),
+        'Quote ' + quote.quote_id + ' (' + money_(value) + '): customer replied "' + approvalWords_(pending.body) +
+        '" on ' + longDate_(pending.time) + ' but has not confirmed',
+        Object.assign(facts, {pending: pending})));
+    } else {
+      // Stop the sequence on reply: a customer who answered needs a personal response, not a nudge.
+      const reply = thread.filter(m => m.time > sent && String(m.direction).toUpperCase() === 'IN' &&
+        m.company_id === opp.company_id).pop();
+      if (reply) {
+        ctx.replied[opp.company_id] = reply;
+        return;
+      }
+      const days = Math.floor((ctx.now - sent) / DAY_MS);
+      out.push(candidate_(KIND.QUOTE, opp.company_id, 80 + value / 500, quoteMsg.to_email, opp.source_thread_id,
+        quote.source_message_id,
+        'Quote ' + quote.quote_id + ' (' + money_(value) + ') sent ' + longDate_(sent) +
+          (days < 2 ? ', no reply yet' : ', no reply in ' + days + ' days'),
+        facts));
+    }
+  });
+  return out;
+}
+
+/** Customer requests (inquiries, quote requests) we never answered. */
+function requestCandidates_(ctx, excluded) {
+  const out = [];
+  ctx.messages.forEach(m => {
+    if (String(m.direction).toUpperCase() !== 'IN') return;
+    if (m.category !== CATEGORY.NEW_INQUIRY && m.category !== CATEGORY.QUOTE_REQUEST) return;
+    const customer = ctx.customers[m.company_id];
+    if (!customer || IDENTITY_FLAGS.test(m.reason || '')) return;
+    const thread = ctx.byThread[m.thread_id] || [];
+    const answered = thread.some(x => x.time > m.time && String(x.direction).toUpperCase() === 'OUT');
+    if (answered) return;
+    const p = parseCommercial_(m.body);
+    const onHold = onHoldMessage_(ctx, m.company_id, p.product);
+    if (onHold) {
+      excluded.push({company_id: m.company_id, company_name: customer.company_name,
+        reason: 'Request for ' + p.product + ' skipped: customer said it is on hold (' + onHold.message_id + ')'});
+      return;
+    }
+    const past = ctx.orders.filter(o => o.company_id === m.company_id).sort((a, b) => toTime_(b.order_date) - toTime_(a.order_date));
+    const same = past.find(o => sameProduct_(o.product, p.product));
+    const waited = Math.floor((ctx.now - m.time) / DAY_MS);
+    const score = 50 + (past.length ? 15 : 0) + (same ? 15 : 0) + Math.min(waited / 3, 10) + (p.product ? 0 : -10);
+    const what = p.product ? (p.quantity ? formatCount_(p.quantity) + ' ' : '') + p.product : 'a general product question';
+    out.push(candidate_(KIND.REQUEST, m.company_id, score, m.from_email, m.thread_id, m.message_id,
+      'Unanswered request for ' + what + ' since ' + longDate_(m.time) + (same ? ' (bought ' + same.product.toLowerCase() + ' before)' : ''),
+      {msg: m, parsed: p, past: past, same: same, waited: waited}));
+  });
+  return out;
+}
+
+/** Past buyers with no orders in 180 days and no email either way in 60 days. */
+function dormantCandidates_(ctx) {
+  const out = [];
+  Object.keys(ctx.customers).forEach(id => {
+    const past = ctx.orders.filter(o => o.company_id === id).sort((a, b) => toTime_(b.order_date) - toTime_(a.order_date));
+    if (!past.length || ctx.now - toTime_(past[0].order_date) < FOLLOW_UP.DORMANT_ORDER_DAYS * DAY_MS) return;
+    const recent = ctx.messages.some(m => m.company_id === id && ctx.now - m.time < FOLLOW_UP.DORMANT_QUIET_DAYS * DAY_MS);
+    if (recent) return;
+    const lifetime = past.reduce((s, o) => s + (Number(o.confirmed_order_total) || 0), 0);
+    const contact = ctx.contacts.find(c => c.company_id === id);
+    out.push(candidate_(KIND.DORMANT, id, 40 + Math.min(lifetime / 1000, 20), contact ? contact.email : '', '',
+      past[0].order_id, 'Past buyer (' + past[0].product + ', ' + monthYear_(toTime_(past[0].order_date)) + '), no contact in 60+ days',
+      {past: past}));
+  });
+  return out;
+}
+
+function candidate_(kind, companyId, score, contactEmail, threadId, evidence, reason, facts) {
+  return {kind: kind, company_id: companyId, score: Math.round(score * 10) / 10, contact_email: normalizeEmail_(contactEmail),
+    thread_id: threadId, evidence: evidence, reason: reason, facts: facts};
+}
+
+/** The person to write to: the one in the evidence if not opted out, else no one (marketing suppression). */
+function recipient_(ctx, companyId, preferredEmail) {
+  const contact = ctx.contacts.find(c => c.email === preferredEmail) ||
+    ctx.contacts.find(c => c.company_id === companyId);
+  if (!contact || isTrue_(contact.marketing_opt_out)) return null;
+  return contact;
+}
+
+/** Today, or 3 days after our last email to this person if that was within the last 2 days. */
+function dueDate_(ctx, email, now) {
+  const lastOut = ctx.messages.filter(m => String(m.direction).toUpperCase() === 'OUT' && normalizeEmail_(m.to_email) === email).pop();
+  let due = now;
+  if (lastOut && now - lastOut.time < FOLLOW_UP.RECENT_TOUCH_DAYS * DAY_MS) due = lastOut.time + FOLLOW_UP.WAIT_AFTER_TOUCH_DAYS * DAY_MS;
+  const d = new Date(due);
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate());
+}
+
+/** A message from this company saying the given product's project is on hold. */
+function onHoldMessage_(ctx, companyId, product) {
+  const noun = headNoun_(product);
+  if (!noun) return null;
+  return ctx.messages.find(m => m.company_id === companyId && String(m.direction).toUpperCase() === 'IN' &&
+    RULES.onHold.test(m.body || '') && String(m.body || '').toLowerCase().indexOf(noun) >= 0) || null;
+}
+
+// ---- Draft writing ----
+
+/** Subject and body for one company. Uses only customer-facing facts; never supplier costs. */
+function draftFollowUp_(primary, extra, contact, businessName, now) {
+  const first = String(contact.full_name || '').split(/\s+/)[0] || 'there';
+  const lines = [];
+  let subject;
+  const f = primary.facts;
+  if (primary.kind === KIND.QUOTE || primary.kind === KIND.APPROVAL) {
+    const q = f.quote;
+    const item = formatCount_(q.quantity) + ' ' + q.product;
+    subject = (primary.kind === KIND.APPROVAL ? 'Checking in on quote ' : 'Following up on ' + (f.revised ? 'your revised quote ' : 'quote ')) +
+      q.quote_id + ': ' + q.product;
+    if (primary.kind === KIND.APPROVAL) {
+      lines.push('Thanks for your reply on ' + longDate_(f.pending.time) + ' about quote ' + q.quote_id + ' for ' + item +
+        ' (' + money_(q.quoted_total) + ' total). ' + approvalContext_(f.pending.body) +
+        ' We have not started production and will not until you confirm in writing.');
+    } else {
+      lines.push('I wanted to follow up on ' + (f.revised ? 'the revised ' : '') + 'quote ' + q.quote_id + ' for ' + item +
+        ' (' + money_(q.quoted_total) + ' total), sent ' + longDate_(f.sent) + (f.event ? ' for your ' + f.event : '') + '.');
+    }
+    if (f.artworkPending) lines.push('We are still waiting on your final logo; once it arrives I can confirm the production schedule.');
+    if (f.validDays && f.sent + f.validDays * DAY_MS < now) {
+      lines.push('The original pricing was valid for ' + f.validDays + ' days, so I will reconfirm it before you approve.');
+    }
+    if (extra) lines.push(extraRequestLine_(extra));
+    lines.push(primary.kind === KIND.APPROVAL ? 'Is there anything I can answer to help with the decision?'
+      : 'Does the ' + (f.revised ? 'updated quantity and ' : '') + 'pricing still work for you, or would a different quantity or timeline help?');
+  } else if (primary.kind === KIND.REQUEST) {
+    const p = f.parsed;
+    const item = p.product ? (p.quantity ? formatCount_(p.quantity) + ' ' : '') + p.product : '';
+    subject = item ? 'Your request for ' + item : 'Your question about colors and samples';
+    lines.push(item
+      ? 'Thank you for your request on ' + longDate_(f.msg.time) + ' for ' + item + (f.waited > 2 ? ', and I am sorry for the slow reply.' : '.')
+      : 'Thank you for your question on ' + longDate_(f.msg.time) + ' about color options and samples' +
+        (f.waited > 2 ? ', and I am sorry for the slow reply.' : '.'));
+    if (f.same) {
+      lines.push('We produced ' + formatCount_(f.same.quantity) + ' ' + f.same.product.toLowerCase() + ' for you in ' +
+        monthYear_(toTime_(f.same.order_date)) + ', so I can match that order or suggest updates.');
+    } else if (f.past.length) {
+      lines.push('Thanks again for your ' + f.past[0].product.toLowerCase() + ' order' +
+        (f.past[0].po_number ? ' (' + f.past[0].po_number + ')' : '') + '.');
+    }
+    lines.push(item
+      ? 'To prepare an accurate quote, could you confirm ' + missingDetails_(f.msg.body) + '?'
+      : 'I would be glad to share available colors and check sample options. Which product are you considering, and roughly how many?');
+  } else {
+    const last = f.past[0];
+    subject = 'Planning your next ' + last.product.toLowerCase() + ' order';
+    lines.push('It has been a while since your ' + last.product.toLowerCase() + ' order in ' + monthYear_(toTime_(last.order_date)) +
+      '. If you have events or gifts coming up, I would be glad to put together options or a quick quote.');
   }
-  const lastIn = lastWhere_(ctx.msgs, m => isInbound_(m));
-  if (lastIn && RULES.onHold.test(String(lastIn.body || '')) &&
-      daysBetween_(lastIn.time, ctx.nowTime) < FOLLOW_UP.HOLD_DAYS) {
-    return 'Customer asked us to check back later (' + lastIn.message_id + ')';
+  const body = 'Hi ' + first + ',\n\n' + lines.join(' ') + '\n\nBest regards,\n' + businessName + ' Sales';
+  return {subject: subject, body: body};
+}
+
+function extraRequestLine_(extra) {
+  const p = extra.facts.parsed;
+  const item = p.product ? (p.quantity ? formatCount_(p.quantity) + ' ' : '') + p.product : 'colors and samples';
+  return 'I also saw your ' + longDate_(extra.facts.msg.time) + ' question about ' + item + ' and would be glad to help with that too.';
+}
+
+/** What the customer said, restated politely, from an ambiguous-approval email. */
+function approvalContext_(body) {
+  const t = String(body || '');
+  const parts = [];
+  if (/looks good/i.test(t)) parts.push('Glad the quote looked good.');
+  const from = /approval from (\w+)/i.exec(t);
+  if (from) parts.push('I know you are waiting on approval from ' + from[1] + '.');
+  else if (/check with (?:the|my) team/i.test(t)) parts.push('I know you were checking with your team.');
+  if (/invoice/i.test(t)) parts.push('Once it is approved, I can send the invoice right away.');
+  return parts.join(' ') || 'I know you were not ready to move ahead yet.';
+}
+
+function approvalWords_(body) {
+  return firstMatch_(RULES.stopPhrase, body) || firstMatch_(RULES.softApproval, body) || 'not yet';
+}
+
+/** Details still needed to quote, based on what the request says is unknown. */
+function missingDetails_(body) {
+  const t = String(body || '').toLowerCase();
+  const asks = [];
+  if (/delivery location|ship|zip/.test(t) || !/\b\d{5}\b/.test(t)) asks.push('the delivery ZIP code');
+  if (!/navy|black|white|teal|natural|red|blue|green|colou?r/.test(t)) asks.push('item and imprint colors');
+  if (!/need(?:ed)? by|in-hand|deadline|\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s+\d/.test(t)) asks.push('your in-hand date');
+  return asks.length ? listJoin_(asks) : 'your artwork file and final quantity';
+}
+
+/** "for a December conference" -> "December conference". */
+function eventPhrase_(thread) {
+  for (const m of thread) {
+    const hit = /for (?:a|an|our|the) ((?:[A-Z][a-z]+ )?(?:conference|event|member event|trade show|fundraiser|meeting|onboarding))/.exec(m.body || '');
+    if (hit && String(m.direction).toUpperCase() === 'IN') return hit[1];
   }
   return '';
 }
 
-/**
- * Open customer quotes: the live (not superseded, not accepted) version per opportunity,
- * with the customer's reply status taken from clean messages in its thread.
- */
-function openQuoteItems_(ctx) {
-  const won = new Set(ctx.orders.map(o => o.quote_id).filter(Boolean));
-  const stageOf = {};
-  ctx.opportunities.forEach(o => { stageOf[o.opportunity_id] = o.stage; });
-  const live = ctx.quotes.filter(q => q.status === QUOTE_STATUS.SENT && !won.has(q.quote_id) &&
-    stageOf[q.opportunity_id] !== STAGE.WON);
-  return live.map(q => {
-    const sent = toTime_(q.sent_at);
-    const sourceMsg = ctx.msgs.find(m => m.message_id === String(q.source_message_id));
-    const thread = sourceMsg ? (ctx.byThread[sourceMsg.thread_id] || []) : [];
-    const reply = lastWhere_(thread, m => m.time > sent && isInbound_(m) && isClean_(m));
-    const evidence = [String(q.source_message_id)].concat(reply ? [reply.message_id] : []);
-    const quote = {id: q.quote_id, product: q.product, quantity: q.quantity, total: q.quoted_total,
-      sent: sent, thread: sourceMsg ? sourceMsg.thread_id : ''};
-    const value = Math.min((Number(q.quoted_total) || 0) / 1000, 10);
-    if (reply) {
-      const waited = daysBetween_(reply.time, ctx.nowTime);
-      return {kind: FOLLOW_UP.KIND.APPROVAL, quote: quote, reply: reply, thread: quote.thread, evidence: evidence,
-        due: reply.time + FOLLOW_UP.APPROVAL_WAIT_DAYS * DAY_MS, score: 60 + Math.min(waited, 30) + value,
-        reason: q.quote_id + ' (' + money_(q.quoted_total) + ') sent ' + monthDay_(sent) + '; customer replied ' +
-          monthDay_(reply.time) + ' without approving ("' + approvalHold_(reply.body) + '"), nothing since'};
-    }
-    const waited = daysBetween_(sent, ctx.nowTime);
-    return {kind: FOLLOW_UP.KIND.QUOTE, quote: quote, thread: quote.thread, evidence: evidence,
-      due: sent + FOLLOW_UP.QUOTE_WAIT_DAYS * DAY_MS, score: 50 + Math.min(waited, 30) + value,
-      reason: q.quote_id + ' (' + money_(q.quoted_total) + ') sent ' + monthDay_(sent) + ', no reply in ' + waited + ' days'};
-  });
+function artworkPending_(thread) {
+  return thread.some(m => String(m.direction).toUpperCase() === 'IN' &&
+    /(?:waiting on|send) (?:the |our )?(?:final )?(?:logo|artwork)|logo later/i.test(m.body || ''));
 }
 
-/** Customer requests (new inquiry / quote request) with no later reply from us in the same thread. */
-function unansweredRequestItems_(ctx) {
-  const quotedThreads = new Set(ctx.quotes.map(q => {
-    const m = ctx.msgs.find(x => x.message_id === String(q.source_message_id));
-    return m ? m.thread_id : '';
-  }));
-  const requests = ctx.msgs.filter(m => isInbound_(m) && isClean_(m) && !quotedThreads.has(m.thread_id) &&
-    (m.category === CATEGORY.NEW_INQUIRY || m.category === CATEGORY.QUOTE_REQUEST));
-  return requests.filter(m => !(ctx.byThread[m.thread_id] || []).some(x => x.time > m.time && !isInbound_(x)))
-    .map(m => {
-      const p = parseCommercial_(m.body);
-      const specific = p.quantity !== null && !!p.product;
-      const waited = daysBetween_(m.time, ctx.nowTime);
-      const what = specific ? fmtQty_(p.quantity) + ' ' + p.product : '"' + m.subject + '"';
-      return {kind: FOLLOW_UP.KIND.REQUEST, request: m, parsed: specific ? p : null, thread: m.thread_id,
-        evidence: [m.message_id], due: m.time + FOLLOW_UP.REQUEST_WAIT_DAYS * DAY_MS,
-        score: 40 + (specific ? 10 : 0) + Math.min(waited, 30),
-        reason: 'Request for ' + what + ' on ' + monthDay_(m.time) + ' has no reply from us (' + waited + ' days)'};
-    });
-}
-
-/** Builds the Follow Ups row from the customer's highest-scoring item. */
-function toTask_(ctx, items, signature) {
-  const top = items[0];
-  const history = purchaseHistory_(ctx);
-  const score = Math.round(top.score + (history ? 10 : 0));
-  const others = items.slice(1).map(i => i.reason);
-  const reason = [top.reason].concat(history ? [history.reason] : [])
-    .concat(others.length ? ['Also open: ' + others.join('; ')] : []).join('. ');
-  const draft = draftFor_(top, ctx, history, signature);
-  const evidence = [];
-  items.forEach(i => i.evidence.forEach(id => { if (evidence.indexOf(id) < 0) evidence.push(id); }));
-  return {
-    task_id: 'FU-' + ctx.id + '-' + top.thread,
-    company_id: ctx.id,
-    contact_email: normalizeEmail_(ctx.contact.email),
-    due_date: startOfDay_(top.due),
-    reason: reason,
-    priority: score >= 75 ? 'High' : score >= 60 ? 'Medium' : 'Low',
-    status: FOLLOW_UP.STATUS.OPEN,
-    source_thread_id: top.thread,
-    draft_subject: draft.subject,
-    draft_body: draft.body,
-    approved: false,
-    evidence_message_ids: evidence.join(', '),
-    _score: score
-  };
-}
-
-/** Prior purchases: confirmed orders in the CRM, else historical orders on the Customers row. */
-function purchaseHistory_(ctx) {
-  const latest = ctx.orders.slice().sort((a, b) => toTime_(a.order_date) - toTime_(b.order_date)).pop();
-  if (latest) {
-    return {order: latest, reason: 'Existing customer: ' + latest.po_number + ' confirmed ' + monthDay_(toTime_(latest.order_date))};
-  }
-  const count = Number(ctx.customer.order_count) || 0;
-  if (!count) return null;
-  const last = ctx.customer.last_order_at ? toTime_(ctx.customer.last_order_at) : NaN;
-  return {order: null, reason: 'Past customer: ' + count + ' earlier order' + (count > 1 ? 's' : '') +
-    (isNaN(last) ? '' : ', last ' + monthDay_(last, true))};
-}
-
-/** One short, specific email asking for a single next step. Never mentions supplier cost. */
-function draftFor_(item, ctx, history, signature) {
-  const first = firstName_(ctx.contact.full_name);
-  const hello = 'Hi ' + first + ',';
-  const thanks = !history ? '' : history.order
-    ? 'Thanks again for ' + history.order.po_number + (history.order.product ? ' (' + history.order.product + ')' : '') +
-      '; that order is in our queue.'
-    : 'Thanks again for ordering with us before.';
-  const sign = 'Best regards,\n' + signature;
-  let subject, lines;
-
-  if (item.kind === FOLLOW_UP.KIND.APPROVAL) {
-    const q = item.quote;
-    subject = 'Checking in on quote ' + q.id + describe_(q, ' for ');
-    lines = ['When we last spoke on ' + monthDay_(item.reply.time) + ', you were getting internal approval for quote ' +
-      q.id + describe_(q, ' for ') + '. Has your team had a chance to review it?',
-      'If it would help, I can send a virtual proof or a sample, or adjust the quantity. Nothing will go into ' +
-      'production until you confirm in writing.'];
-  } else if (item.kind === FOLLOW_UP.KIND.QUOTE) {
-    const q = item.quote;
-    subject = 'Following up on quote ' + q.id + describe_(q, ' for ');
-    lines = ['I wanted to follow up on quote ' + q.id + describe_(q, ' for ') + ' (' + money_(q.total) +
-      ' total), which I sent on ' + monthDay_(q.sent) + '.',
-      'Would you like to move ahead, or is there anything you would like changed first, such as the quantity, ' +
-      'colors or delivery date? I am happy to re-confirm pricing and timing before you decide.'];
-  } else {
-    const m = item.request, p = item.parsed;
-    subject = /^re:/i.test(m.subject) ? m.subject : 'Re: ' + m.subject;
-    lines = p
-      ? ['Thank you for your request on ' + monthDay_(m.time) + ' for ' + fmtQty_(p.quantity) + ' ' + p.product +
-        ', and I am sorry for the slow reply.',
-        'So I can send accurate pricing and production timing, could you confirm the item color, imprint colors ' +
-        'and location, the delivery ZIP code and your in-hand date? A logo file would help too, if you have one ready.']
-      : ['Thank you for your message on ' + monthDay_(m.time) + ', and I am sorry for the slow reply.',
-        'I would be glad to help. Could you share the product, quantity and in-hand date you have in mind? ' +
-        'I can then send color options and arrange a sample.'];
-  }
-  if (thanks) lines.push(thanks);
-  return {subject: subject, body: [hello].concat(lines).concat([sign]).join('\n\n')};
-}
-
-/** The contact the company's messages refer to most, else the first Contacts row for the company. */
-function pickContact_(companyId, contacts, msgs) {
-  const mine = contacts.filter(c => c.company_id === companyId && normalizeEmail_(c.email));
-  if (!mine.length) return null;
-  const counts = {};
-  msgs.forEach(m => { if (m.contact_id) counts[m.contact_id] = (counts[m.contact_id] || 0) + 1; });
-  return mine.slice().sort((a, b) => (counts[b.contact_id] || 0) - (counts[a.contact_id] || 0))[0];
-}
-
-/** The phrase that kept a reply from being an approval, e.g. "check with the team". */
-function approvalHold_(body) {
-  return firstMatch_(RULES.stopPhrase, body) || firstMatch_(RULES.softApproval, body) || 'no decision';
-}
-
-function describe_(q, joiner) {
-  const parts = [q.quantity ? fmtQty_(q.quantity) : '', q.product || ''].filter(Boolean).join(' ');
-  return parts ? joiner + parts : '';
-}
-
-function isInbound_(m) {
-  return String(m.direction || '').toUpperCase() === 'IN';
-}
-
-function isClean_(m) {
-  return String(m.reason || m.classification_reason || '').indexOf(FOLLOW_UP.MIXED_THREAD) < 0;
-}
-
-function lastWhere_(list, pred) {
-  for (let i = list.length - 1; i >= 0; i--) if (pred(list[i])) return list[i];
-  return null;
-}
-
-function groupBy_(list, keyFn) {
-  const out = {};
-  list.forEach(x => { const k = keyFn(x); if (k) (out[k] = out[k] || []).push(x); });
-  return out;
-}
-
-/** Whole calendar days from a to b (both epoch ms), never negative. */
-function daysBetween_(a, b) {
-  return Math.max(0, Math.floor((startOfDay_(b).getTime() - startOfDay_(a).getTime()) / DAY_MS + 0.5));
-}
-
-/** Local midnight (the script time zone in Apps Script). */
-function startOfDay_(time) {
-  const d = new Date(time);
-  return new Date(d.getFullYear(), d.getMonth(), d.getDate());
-}
-
-function monthDay_(time, withYear) {
-  const d = new Date(time);
-  return MONTHS[d.getMonth()].replace(/^./, c => c.toUpperCase()) + ' ' + d.getDate() +
-    (withYear ? ', ' + d.getFullYear() : '');
-}
-
-function firstName_(fullName) {
-  const first = String(fullName || '').trim().split(/\s+/)[0];
-  return first || 'there';
-}
-
-function fmtQty_(n) {
-  return Number(n).toLocaleString('en-US');
+/** "Price valid for seven days" / "Valid 7 days" -> 7. */
+function validityDays_(body) {
+  const m = /valid (?:for )?(\w+) days/i.exec(String(body || ''));
+  if (!m) return null;
+  return /^\d+$/.test(m[1]) ? Number(m[1]) : NUMBER_WORDS[m[1].toLowerCase()] || null;
 }
 
 function money_(n) {
-  const v = Number(n);
-  return isNaN(v) || n === '' || n === null ? 'amount not stated'
-    : '$' + v.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+  return '$' + Number(n || 0).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+}
+
+function formatCount_(n) {
+  return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+}
+
+function longDate_(time) {
+  const d = new Date(time);
+  return capitalize_(MONTHS[d.getMonth()]) + ' ' + d.getDate();
+}
+
+function monthYear_(time) {
+  const d = new Date(time);
+  return capitalize_(MONTHS[d.getMonth()]) + ' ' + d.getFullYear();
+}
+
+function capitalize_(s) {
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+function lowerFirst_(s) {
+  return s.charAt(0).toLowerCase() + s.slice(1);
+}
+
+function listJoin_(items) {
+  if (items.length < 3) return items.join(' and ');
+  return items.slice(0, -1).join(', ') + ', and ' + items[items.length - 1];
+}
+
+/**
+ * Same product for "you bought this before": the last two words must match
+ * ("travel mugs" = "Travel mugs"), so "cooler bags" is not "canvas tote bags".
+ */
+function sameProduct_(a, b) {
+  const key = s => String(s || '').toLowerCase().replace(/[^a-z0-9 ]/g, ' ').split(/\s+/).filter(Boolean)
+    .map(w => w.replace(/s$/, '')).slice(-2).join(' ');
+  return Boolean(key(a)) && key(a) === key(b);
 }

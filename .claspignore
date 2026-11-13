@@ -1,1 +1,4 @@
 SWAG_Shop_Hackathon/**
+tests/**
+package.json
+node_modules/**

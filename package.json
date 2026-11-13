@@ -1,0 +1,11 @@
+{
+  "name": "swag-crm",
+  "version": "0.1.0",
+  "private": true,
+  "description": "SWAG Shop Google Sheets CRM (Apps Script). Apps Script source lives at the repo root and is deployed with clasp; tests/ runs offline with npm test.",
+  "scripts": {
+    "test": "node --test \"tests/**/*.test.js\"",
+    "push": "clasp push",
+    "pull": "clasp pull"
+  }
+}
