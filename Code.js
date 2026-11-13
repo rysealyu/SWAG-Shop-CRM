@@ -4,7 +4,8 @@
  * message logging, scheduled trigger and sync logs. Classification lives in
  * Classify.js / ClassifyRunner.js; seed customers/suppliers in Seed.js;
  * quote/order/opportunity rows in Extract.js / RecordsRunner.js; attachments
- * in Attachments.js / AttachmentsRunner.js; extra Dashboard rows in Dashboard.js.
+ * in Attachments.js / AttachmentsRunner.js; follow-up drafts in FollowUps.js /
+ * FollowUpsRunner.js; extra Dashboard rows in Dashboard.js.
  *
  * Data safety: no email is sent by this script. Do not add automatic sends.
  */
@@ -21,7 +22,7 @@ const HEADER_MAP = {
  'Orders':['order_id','company_id','quote_id','order_date','po_number','product','quantity','unit_price','freight','confirmed_order_total','status','source_message_id','quote_link_basis','amount_basis','review_reason','manual_lock'],
  'Supplier Quotes':['supplier_quote_id','supplier_id','customer_opportunity_id','received_at','product','quantity','unit_cost','setup_cost','freight_cost','moq','lead_time','source_message_id','link_basis','doc_check','manual_lock'],
  'Attachments':['attachment_id','message_id','filename','mime_type','drive_url','extracted_fields_json','parsed_at','review_status','sha256','document_type','company_id','opportunity_id','quote_id','missing_fields','review_reason','manual_lock'],
- 'Follow Ups':['task_id','company_id','contact_email','due_date','reason','priority','status','source_thread_id','draft_subject','draft_body','approved'],
+ 'Follow Ups':['task_id','company_id','contact_email','due_date','reason','priority','status','source_thread_id','draft_subject','draft_body','approved','evidence_message_ids','gmail_draft_id'],
  'Sync Log':['run_id','started_at','finished_at','status','processed_count','skipped_duplicate_count','error_count','details'],
  'Settings':['setting','value','notes'],
  'Suppliers':['supplier_id','supplier_name','email','category','region','notes']
@@ -35,6 +36,8 @@ function onOpen() {
     .addItem('Classify emails', 'classifyEmailLog')
     .addItem('Build quotes, orders & opportunities', 'buildCrmRecords')
     .addItem('Process attachments (PDF, Excel, images)', 'processAttachments')
+    .addItem('Generate follow-up drafts (top 10, not sent)', 'generateFollowUps')
+    .addItem('Create Gmail drafts for approved follow-ups', 'createApprovedFollowUpDrafts')
     .addSeparator()
     .addItem('Sync Gmail now (authorized test account)', 'syncNow')
     .addItem('Install daily sync trigger', 'installDailySync')
